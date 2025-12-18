@@ -1,30 +1,20 @@
 # TelleR Utilities
 
-Unity editor utilities by TelleR.
+Unity 개발에 자주 사용하는 유틸리티 모음
 
-## Features
+## 설치 방법
 
-### Fast Clone
-Quickly create and manage Unity project clones for multiplayer testing.
-- Symlink-based fast cloning (Assets, Packages, ProjectSettings)
-- Library folder copy for independent execution
-- Clone management UI
+1. Package Manager 열기 (Window → Package Manager)
+2. '+' 버튼 → Add package from git URL
+3. 입력: `https://github.com/KimJinWooDa/Utils.git`
 
-## Installation
+## 기능 목록
 
-### Via Git URL
-1. Open Package Manager (Window → Package Manager)
-2. Click '+' → Add package from git URL
-3. Enter: https://github.com/KimJinWooDa/Utils.git
+| 기능 | 설명 | 경로 |
+|------|------|------|
+| Fast Clone | 멀티플레이 테스트용 프로젝트 복제 | `Tools → TelleR → Clones Manager` |
+| Audio Volume 3D | 3D 오디오 볼륨 시각화 | 컴포넌트 추가 |
 
-
-## Usage
-
-### Fast Clone
-1. Open `Tools → TelleR → Clones Manager`
-2. Click "Create New Clone"
-3. Open or delete clones from the list
-
-## License
+## 라이선스
 
 MIT License
