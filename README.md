@@ -13,7 +13,8 @@ Unity 개발에 자주 사용하는 유틸리티 모음
 | 기능 | 설명 | 경로 |
 |------|------|------|
 | Fast Clone | 멀티플레이 테스트용 프로젝트 복제 | `Tools → TelleR → Clones Manager` |
-| Audio Volume 3D | 3D 오디오 볼륨 시각화 | 컴포넌트 추가 |
+| Audio Volume 3D | 3D 오디오 볼륨 시각화 | 컴포넌트로 추가하면 됨 |
+| UPMPackageCreator | Unity에서 UPM 등록을 쉽게 도와주는 Editor Window Tool | `Tools → TelleR → UPMPackageCreator` |
 
 ## 라이선스
 
