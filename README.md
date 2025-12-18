@@ -15,12 +15,8 @@ Quickly create and manage Unity project clones for multiplayer testing.
 ### Via Git URL
 1. Open Package Manager (Window → Package Manager)
 2. Click '+' → Add package from git URL
-3. Enter: `https://github.com/YOUR_USERNAME/com.teller.util.git`
+3. Enter: https://github.com/KimJinWooDa/Utils.git
 
-### Via Git URL with specific version
-```
-https://github.com/YOUR_USERNAME/com.teller.util.git#v1.0.0
-```
 
 ## Usage
 
