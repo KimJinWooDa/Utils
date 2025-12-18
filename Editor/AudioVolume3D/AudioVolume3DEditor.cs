@@ -21,7 +21,6 @@ namespace TelleR
         private SerializedProperty showFadeZoneProp;
         private SerializedProperty showInnerVolumesProp;
         private SerializedProperty showOcclusionZonesProp;
-        private SerializedProperty showDebugAtRuntimeProp;
         private SerializedProperty volumeCenterProp;
         private SerializedProperty volumeSizeProp;
         private SerializedProperty fadeDistanceProp;
@@ -57,7 +56,6 @@ namespace TelleR
             showFadeZoneProp = serializedObject.FindProperty("ShowFadeZone");
             showInnerVolumesProp = serializedObject.FindProperty("ShowInnerVolumes");
             showOcclusionZonesProp = serializedObject.FindProperty("ShowOcclusionZones");
-            showDebugAtRuntimeProp = serializedObject.FindProperty("ShowDebugAtRuntime");
 
             volumeCenterProp = serializedObject.FindProperty("VolumeCenter");
             volumeSizeProp = serializedObject.FindProperty("VolumeSize");
@@ -165,7 +163,6 @@ namespace TelleR
             EditorGUILayout.PropertyField(zoneColorProp);
             EditorGUILayout.PropertyField(fadeZoneColorProp);
             EditorGUILayout.PropertyField(occlusionZoneColorProp);
-            EditorGUILayout.PropertyField(showDebugAtRuntimeProp);
             EditorGUILayout.Space();
             gizmoHandleScaleProp.floatValue = EditorGUILayout.Slider("Handle Size", gizmoHandleScaleProp.floatValue, 0.01f, 3f);
         }
