@@ -1,7 +1,7 @@
 {
-  "name": "TelleR.Util.Editor",
-  "rootNamespace": "TelleR.Util",
-  "references": [],
+  "name": "Teller.Util.Editor",
+  "rootNamespace": "Teller.Util",
   "includePlatforms": ["Editor"],
-  "excludePlatforms": []
+  "excludePlatforms": [],
+  "references": ["Teller.Util"]
 }
