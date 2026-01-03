@@ -7,7 +7,7 @@ namespace TelleR.Util.FastClone
 {
     public class FastCloneWindow : EditorWindow
     {
-        [MenuItem("Tools/TelleR/Clones Manager")]
+        [MenuItem("Tools/TelleR/Tool/Clones Manager")]
         public static void ShowWindow()
         {
             var wnd = GetWindow<FastCloneWindow>();
