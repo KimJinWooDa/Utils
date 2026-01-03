@@ -36,7 +36,7 @@ namespace TelleR
         private string currentPackagePath;
         private List<string> pendingScripts = new List<string>();
 
-        [MenuItem("Tools/TelleR/UPM Package Creator")]
+        [MenuItem("Tools/TelleR/Tool/UPM Package Creator")]
         public static void ShowWindow()
         {
             var window = GetWindow<UPMPackageCreator>();
