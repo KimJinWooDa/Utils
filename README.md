@@ -31,18 +31,20 @@ https://github.com/KimJinWooDa/Utils.git
 
 | 기능 | 이런 상황에 사용하세요 | 사용 방법 |
 |------|------------------------|-----------|
-| 🚀 **[Fast Clone](#1--fast-clone)** | 멀티플레이어 테스트, 다중 에디터 실행, 디스크 용량 절약 | `Tools → TelleR → Tool → Clones Manager` |
-| 🔊 **[Audio Volume 3D](#2--audio-volume-3d)** | 3D 사운드 볼륨 영역 시각화, Fade/Occlusion 설정 | `Add Component → Audio Volume 3D` |
-| 📦 **[UPM Package Creator](#3--upm-package-creator)** | UPM 패키지 생성, package.json/asmdef 자동 생성 | `Tools → TelleR → Tool → UPM Package Creator` |
-| 🎬 **[Animation Inspector Controller](#4--animation-inspector-controller)** | 에디터 애니메이션 미리보기, 프레임 이벤트/트랜지션 | `Add Component → Animation Inspector Controller` |
-| ◈ **[Mesh Pivot Tool](#5--mesh-pivot-tool)** | 메쉬 피벗 위치 수정, 프리셋/버텍스 스냅 | `MeshFilter 우클릭 → Edit Mesh Pivot` |
+| 🚀 **Fast Clone** | 멀티플레이어 테스트, 다중 에디터 실행, 디스크 용량 절약 | `Tools → TelleR → Tool → Clones Manager` |
+| 🔊 **Audio Volume 3D** | 3D 사운드 볼륨 영역 시각화, Fade/Occlusion 설정 | `Add Component → Audio Volume 3D` |
+| 📦 **UPM Package Creator** | UPM 패키지 생성, package.json/asmdef 자동 생성 | `Tools → TelleR → Tool → UPM Package Creator` |
+| 🎬 **Animation Inspector Controller** | 에디터 애니메이션 미리보기, 프레임 이벤트/트랜지션 | `Add Component → Animation Inspector Controller` |
+| ◈ **Mesh Pivot Tool** | 메쉬 피벗 위치 수정, 프리셋/버텍스 스냅 | `MeshFilter 우클릭 → Edit Mesh Pivot` |
 
 ---
 
 ## 📖 상세 설명
 
 <details>
-<summary><h3>1. 🚀 Fast Clone</h3></summary>
+<summary>🚀 <b>Fast Clone</b> - 멀티플레이어 테스트용 프로젝트 복제</summary>
+
+<br>
 
 **멀티플레이어 테스트를 위해 여러 Unity 에디터를 동시에 실행해야 할 때 사용합니다.**
 
@@ -63,7 +65,9 @@ https://github.com/KimJinWooDa/Utils.git
 ---
 
 <details>
-<summary><h3>2. 🔊 Audio Volume 3D</h3></summary>
+<summary>🔊 <b>Audio Volume 3D</b> - 3D 사운드 볼륨 영역 시각화</summary>
+
+<br>
 
 **AudioSource의 3D 사운드 영역을 시각화하고 복잡한 볼륨 존을 구성할 때 사용합니다.**
 
@@ -90,7 +94,9 @@ https://github.com/KimJinWooDa/Utils.git
 ---
 
 <details>
-<summary><h3>3. 📦 UPM Package Creator</h3></summary>
+<summary>📦 <b>UPM Package Creator</b> - UPM 패키지 생성 도구</summary>
+
+<br>
 
 **자신의 코드를 Unity Package Manager 패키지로 만들어 Git URL로 배포하고 싶을 때 사용합니다.**
 
@@ -115,7 +121,9 @@ STEP 3 → 버전 업데이트 및 개발 모드 전환
 ---
 
 <details>
-<summary><h3>4. 🎬 Animation Inspector Controller</h3></summary>
+<summary>🎬 <b>Animation Inspector Controller</b> - 에디터 애니메이션 미리보기</summary>
+
+<br>
 
 **에디터에서 애니메이션을 미리보고, 프레임 이벤트와 자동 트랜지션을 설정할 때 사용합니다.**
 
@@ -142,7 +150,9 @@ STEP 3 → 버전 업데이트 및 개발 모드 전환
 ---
 
 <details>
-<summary><h3>5. ◈ Mesh Pivot Tool</h3></summary>
+<summary>◈ <b>Mesh Pivot Tool</b> - 메쉬 피벗 위치 수정</summary>
+
+<br>
 
 **메쉬의 피벗 위치를 수정해야 할 때 사용합니다.**
 
