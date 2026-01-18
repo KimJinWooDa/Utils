@@ -9,6 +9,8 @@ namespace TelleR.Tools
         [SerializeField] private float snap;
         [SerializeField] private Mesh originalMesh;
         [SerializeField] private Mesh workingMesh;
+        [SerializeField] private Quaternion originalRotation = Quaternion.identity;
+        [SerializeField] private bool rotationStored;
 
         public float Snap
         {
@@ -29,6 +31,12 @@ namespace TelleR.Tools
 
             if (originalMesh == null)
                 return;
+
+            if (!rotationStored)
+            {
+                originalRotation = transform.rotation;
+                rotationStored = true;
+            }
 
             if (workingMesh == null)
             {
@@ -76,6 +84,72 @@ namespace TelleR.Tools
             MovePivotToWorld(targetWorld);
         }
 
+        public void SetPivotRotation(Quaternion targetWorldRotation)
+        {
+            EnsureInitialized();
+
+            if (workingMesh == null)
+                return;
+
+            Transform t = transform;
+            Quaternion currentRot = t.rotation;
+            Quaternion deltaRot = Quaternion.Inverse(currentRot) * targetWorldRotation;
+
+            if (Quaternion.Angle(Quaternion.identity, deltaRot) < 0.001f)
+                return;
+
+            Quaternion inverseRot = Quaternion.Inverse(deltaRot);
+
+            Vector3[] verts = workingMesh.vertices;
+            for (int i = 0; i < verts.Length; i++)
+                verts[i] = inverseRot * verts[i];
+
+            workingMesh.vertices = verts;
+            workingMesh.RecalculateBounds();
+            workingMesh.RecalculateNormals();
+
+            Vector3[] normals = workingMesh.normals;
+            for (int i = 0; i < normals.Length; i++)
+                normals[i] = inverseRot * normals[i];
+            workingMesh.normals = normals;
+
+            if (workingMesh.tangents != null && workingMesh.tangents.Length > 0)
+            {
+                Vector4[] tangents = workingMesh.tangents;
+                for (int i = 0; i < tangents.Length; i++)
+                {
+                    Vector3 tan = new Vector3(tangents[i].x, tangents[i].y, tangents[i].z);
+                    tan = inverseRot * tan;
+                    tangents[i] = new Vector4(tan.x, tan.y, tan.z, tangents[i].w);
+                }
+                workingMesh.tangents = tangents;
+            }
+
+            t.rotation = targetWorldRotation;
+
+            RefreshMeshCollider();
+        }
+
+        public void RotatePivotBy(Quaternion deltaRotation)
+        {
+            Quaternion target = transform.rotation * deltaRotation;
+            SetPivotRotation(target);
+        }
+
+        public void AlignToWorld()
+        {
+            SetPivotRotation(Quaternion.identity);
+        }
+
+        public void SetForwardDirection(Vector3 worldDirection)
+        {
+            if (worldDirection.sqrMagnitude < 0.001f)
+                return;
+
+            Quaternion targetRot = Quaternion.LookRotation(worldDirection, Vector3.up);
+            SetPivotRotation(targetRot);
+        }
+
         public Bounds GetCurrentLocalBounds()
         {
             MeshFilter meshFilter = GetComponent<MeshFilter>();
@@ -95,12 +169,16 @@ namespace TelleR.Tools
             if (originalMesh != null)
                 meshFilter.sharedMesh = originalMesh;
 
+            if (rotationStored)
+                transform.rotation = originalRotation;
+
             if (workingMesh != null)
             {
                 DestroyImmediate(workingMesh);
                 workingMesh = null;
             }
 
+            rotationStored = false;
             RefreshMeshCollider();
         }
 

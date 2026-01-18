@@ -9,6 +9,7 @@ namespace TelleR.Tools.Editor
     public class MeshPivotToolEditor : UnityEditor.Editor
     {
         private static readonly Color AccentColor = new Color(0.35f, 0.65f, 0.95f);
+        private static readonly Color RotationColor = new Color(0.65f, 0.95f, 0.45f);
         private static readonly Color DangerColor = new Color(0.95f, 0.45f, 0.45f);
         private static readonly Color VertexSnapColor = new Color(0.95f, 0.75f, 0.25f);
         private static readonly Color HeaderBg = new Color(0.18f, 0.18f, 0.18f);
@@ -17,11 +18,20 @@ namespace TelleR.Tools.Editor
         private Vector3[] cachedVertices;
         private int cachedMeshId;
 
+        private enum HandleMode { Position, Rotation }
+        private HandleMode currentMode = HandleMode.Position;
+
+        private Vector3 customEuler = Vector3.zero;
+        private bool eulerFoldout;
+
         private void OnEnable()
         {
             MeshPivotTool tool = target as MeshPivotTool;
             if (tool != null)
+            {
                 tool.EnsureInitialized();
+                customEuler = tool.transform.eulerAngles;
+            }
 
             CacheVertices(tool);
         }
@@ -59,9 +69,13 @@ namespace TelleR.Tools.Editor
 
             DrawHeader();
             EditorGUILayout.Space(6);
+            DrawModeToggle();
+            EditorGUILayout.Space(6);
             DrawSnapSlider(tool);
             EditorGUILayout.Space(6);
             DrawPivotPresets(tool);
+            EditorGUILayout.Space(6);
+            DrawRotationSection(tool);
             EditorGUILayout.Space(6);
             DrawActions(tool);
 
@@ -80,7 +94,14 @@ namespace TelleR.Tools.Editor
             Event e = Event.current;
             bool ctrlHeld = e.control || e.command;
 
-            if (ctrlHeld && e.type == EventType.MouseDown && e.button == 0)
+            if (e.type == EventType.KeyDown && e.keyCode == KeyCode.R && !e.control && !e.shift && !e.alt)
+            {
+                currentMode = currentMode == HandleMode.Position ? HandleMode.Rotation : HandleMode.Position;
+                e.Use();
+                Repaint();
+            }
+
+            if (ctrlHeld && e.type == EventType.MouseDown && e.button == 0 && currentMode == HandleMode.Position)
             {
                 Vector3 snappedVertex;
                 if (TryGetNearestVertex(tool, e.mousePosition, out snappedVertex))
@@ -93,15 +114,16 @@ namespace TelleR.Tools.Editor
                 }
             }
 
-            if (ctrlHeld)
+            if (ctrlHeld && currentMode == HandleMode.Position)
             {
                 DrawNearestVertexHighlight(tool, e.mousePosition);
                 HandleUtility.Repaint();
             }
 
-            if (!ctrlHeld)
+            Transform t = tool.transform;
+
+            if (currentMode == HandleMode.Position && !ctrlHeld)
             {
-                Transform t = tool.transform;
                 Vector3 pivotWorld = t.position;
 
                 EditorGUI.BeginChangeCheck();
@@ -119,9 +141,68 @@ namespace TelleR.Tools.Editor
                     MarkDirty(tool);
                 }
             }
+            else if (currentMode == HandleMode.Rotation)
+            {
+                EditorGUI.BeginChangeCheck();
+                Quaternion newRot = Handles.RotationHandle(t.rotation, t.position);
+
+                if (EditorGUI.EndChangeCheck())
+                {
+                    RecordPivotChange(tool, "Rotate Pivot");
+                    tool.SetPivotRotation(newRot);
+                    customEuler = newRot.eulerAngles;
+                    MarkDirty(tool);
+                }
+            }
 
             DrawBoundsWire(tool);
             DrawSceneOverlay(tool, ctrlHeld);
+        }
+
+        private void DrawModeToggle()
+        {
+            Rect box = EditorGUILayout.BeginVertical();
+            EditorGUI.DrawRect(box, BoxBg);
+            GUILayout.Space(8);
+
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                GUILayout.Space(10);
+
+                GUIStyle toggleStyle = new GUIStyle(GUI.skin.button)
+                {
+                    fontStyle = FontStyle.Bold,
+                    fixedHeight = 26
+                };
+
+                Color oldBg = GUI.backgroundColor;
+
+                GUI.backgroundColor = currentMode == HandleMode.Position ? AccentColor : Color.gray;
+                if (GUILayout.Button("⊕ Position", toggleStyle))
+                    currentMode = HandleMode.Position;
+
+                GUILayout.Space(4);
+
+                GUI.backgroundColor = currentMode == HandleMode.Rotation ? RotationColor : Color.gray;
+                if (GUILayout.Button("↻ Rotation", toggleStyle))
+                    currentMode = HandleMode.Rotation;
+
+                GUI.backgroundColor = oldBg;
+
+                GUILayout.Space(10);
+            }
+
+            GUILayout.Space(4);
+
+            GUIStyle hint = new GUIStyle(EditorStyles.miniLabel)
+            {
+                alignment = TextAnchor.MiddleCenter,
+                normal = { textColor = Color.gray }
+            };
+            EditorGUILayout.LabelField("Press R in Scene to toggle", hint);
+
+            GUILayout.Space(6);
+            EditorGUILayout.EndVertical();
         }
 
         private bool TryGetNearestVertex(MeshPivotTool tool, Vector2 mousePos, out Vector3 worldVertex)
@@ -303,6 +384,123 @@ namespace TelleR.Tools.Editor
             EditorGUILayout.EndVertical();
         }
 
+        private void DrawRotationSection(MeshPivotTool tool)
+        {
+            Rect box = EditorGUILayout.BeginVertical();
+            EditorGUI.DrawRect(box, BoxBg);
+            GUILayout.Space(10);
+
+            GUIStyle sectionLabel = new GUIStyle(EditorStyles.boldLabel)
+            {
+                alignment = TextAnchor.MiddleCenter
+            };
+            EditorGUILayout.LabelField("Pivot Rotation", sectionLabel);
+
+            GUILayout.Space(8);
+
+            GUIStyle dirBtn = new GUIStyle(GUI.skin.button)
+            {
+                fontSize = 10,
+                fontStyle = FontStyle.Bold
+            };
+
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                GUILayout.Space(10);
+
+                Color oldBg = GUI.backgroundColor;
+                GUI.backgroundColor = RotationColor;
+                if (GUILayout.Button("WORLD ALIGN", dirBtn, GUILayout.Height(28)))
+                {
+                    RecordPivotChange(tool, "Align to World");
+                    tool.AlignToWorld();
+                    customEuler = Vector3.zero;
+                    MarkDirty(tool);
+                }
+                GUI.backgroundColor = oldBg;
+
+                GUILayout.Space(10);
+            }
+
+            GUILayout.Space(8);
+
+            EditorGUILayout.LabelField("Forward Direction:", EditorStyles.miniBoldLabel);
+            GUILayout.Space(4);
+
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                GUILayout.Space(10);
+
+                if (GUILayout.Button("+X", dirBtn, GUILayout.Width(40), GUILayout.Height(24)))
+                    ApplyForwardPreset(tool, Vector3.right);
+                if (GUILayout.Button("-X", dirBtn, GUILayout.Width(40), GUILayout.Height(24)))
+                    ApplyForwardPreset(tool, Vector3.left);
+
+                GUILayout.Space(8);
+
+                if (GUILayout.Button("+Y", dirBtn, GUILayout.Width(40), GUILayout.Height(24)))
+                    ApplyForwardPreset(tool, Vector3.up);
+                if (GUILayout.Button("-Y", dirBtn, GUILayout.Width(40), GUILayout.Height(24)))
+                    ApplyForwardPreset(tool, Vector3.down);
+
+                GUILayout.Space(8);
+
+                if (GUILayout.Button("+Z", dirBtn, GUILayout.Width(40), GUILayout.Height(24)))
+                    ApplyForwardPreset(tool, Vector3.forward);
+                if (GUILayout.Button("-Z", dirBtn, GUILayout.Width(40), GUILayout.Height(24)))
+                    ApplyForwardPreset(tool, Vector3.back);
+
+                GUILayout.FlexibleSpace();
+            }
+
+            GUILayout.Space(10);
+
+            eulerFoldout = EditorGUILayout.Foldout(eulerFoldout, "Custom Euler Angles", true);
+            if (eulerFoldout)
+            {
+                GUILayout.Space(4);
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    GUILayout.Space(10);
+
+                    EditorGUI.BeginChangeCheck();
+                    customEuler = EditorGUILayout.Vector3Field(GUIContent.none, customEuler);
+
+                    if (GUILayout.Button("Set", GUILayout.Width(40)))
+                    {
+                        RecordPivotChange(tool, "Set Custom Rotation");
+                        tool.SetPivotRotation(Quaternion.Euler(customEuler));
+                        MarkDirty(tool);
+                    }
+
+                    GUILayout.Space(10);
+                }
+
+                GUILayout.Space(4);
+
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    GUILayout.Space(10);
+                    if (GUILayout.Button("Get Current", GUILayout.Height(22)))
+                    {
+                        customEuler = tool.transform.eulerAngles;
+                    }
+                    GUILayout.Space(10);
+                }
+            }
+
+            GUILayout.Space(10);
+            EditorGUILayout.EndVertical();
+        }
+
+        private void ApplyForwardPreset(MeshPivotTool tool, Vector3 direction)
+        {
+            RecordPivotChange(tool, $"Forward {direction}");
+            tool.SetForwardDirection(direction);
+            customEuler = tool.transform.eulerAngles;
+            MarkDirty(tool);
+        }
+
         private void DrawActions(MeshPivotTool tool)
         {
             Rect box = EditorGUILayout.BeginVertical();
@@ -404,6 +602,7 @@ namespace TelleR.Tools.Editor
             if (mf != null) Undo.RecordObject(mf, "Revert Pivot");
             if (mc != null) Undo.RecordObject(mc, "Revert Pivot");
             Undo.RecordObject(tool, "Revert Pivot");
+            Undo.RecordObject(tool.transform, "Revert Pivot");
 
             tool.RestoreOriginalMesh();
 
@@ -448,7 +647,8 @@ namespace TelleR.Tools.Editor
             Bounds b = tool.GetCurrentLocalBounds();
             Transform t = tool.transform;
 
-            Handles.color = new Color(AccentColor.r, AccentColor.g, AccentColor.b, 0.6f);
+            Color wireColor = currentMode == HandleMode.Rotation ? RotationColor : AccentColor;
+            Handles.color = new Color(wireColor.r, wireColor.g, wireColor.b, 0.6f);
             Handles.matrix = t.localToWorldMatrix;
             Handles.DrawWireCube(b.center, b.size);
             Handles.matrix = Matrix4x4.identity;
@@ -458,17 +658,30 @@ namespace TelleR.Tools.Editor
         {
             Handles.BeginGUI();
 
-            string text = ctrlHeld
-                ? "◈ Vertex Snap  |  Click to snap"
-                : "◈ Pivot Edit  |  Ctrl = Vertex Snap";
+            string text;
+            Color bgColor;
+            Color textColor;
 
-            Color bgColor = ctrlHeld
-                ? new Color(VertexSnapColor.r * 0.3f, VertexSnapColor.g * 0.3f, VertexSnapColor.b * 0.3f, 0.85f)
-                : new Color(0, 0, 0, 0.7f);
+            if (currentMode == HandleMode.Rotation)
+            {
+                text = "◈ Rotation Mode  |  R = Position";
+                bgColor = new Color(RotationColor.r * 0.3f, RotationColor.g * 0.3f, RotationColor.b * 0.3f, 0.85f);
+                textColor = RotationColor;
+            }
+            else if (ctrlHeld)
+            {
+                text = "◈ Vertex Snap  |  Click to snap";
+                bgColor = new Color(VertexSnapColor.r * 0.3f, VertexSnapColor.g * 0.3f, VertexSnapColor.b * 0.3f, 0.85f);
+                textColor = VertexSnapColor;
+            }
+            else
+            {
+                text = "◈ Position Mode  |  R = Rotation  |  Ctrl = Snap";
+                bgColor = new Color(0, 0, 0, 0.7f);
+                textColor = Color.white;
+            }
 
-            Color textColor = ctrlHeld ? VertexSnapColor : Color.white;
-
-            Rect r = new Rect(10, 10, 220, 28);
+            Rect r = new Rect(10, 10, 280, 28);
             EditorGUI.DrawRect(r, bgColor);
 
             GUIStyle style = new GUIStyle(EditorStyles.boldLabel)
