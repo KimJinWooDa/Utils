@@ -1755,7 +1755,18 @@ namespace TelleR
                 devModeButton.text = "배포 모드로 전환";
             }
 
-            EditorApplication.delayCall += () => { AssetDatabase.Refresh(ImportAssetOptions.ForceUpdate); };
+            EditorApplication.delayCall += () =>
+            {
+                AssetDatabase.Refresh(ImportAssetOptions.ForceUpdate);
+
+                EditorApplication.delayCall += () =>
+                {
+                    UpdateDevModeUI();
+                    RefreshFeatureList();
+                    RefreshOrganizerFeatureOptions();
+                    Repaint();
+                };
+            };
         }
 
         private bool IsDevModeEnabled(string manifestContent, string packageName)
