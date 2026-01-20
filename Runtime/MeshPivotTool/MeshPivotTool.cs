@@ -9,8 +9,9 @@ namespace TelleR.Tools
         [SerializeField] private float snap;
         [SerializeField] private Mesh originalMesh;
         [SerializeField] private Mesh workingMesh;
+        [SerializeField] private Vector3 originalPosition;
         [SerializeField] private Quaternion originalRotation = Quaternion.identity;
-        [SerializeField] private bool rotationStored;
+        [SerializeField] private bool transformStored;
 
         public float Snap
         {
@@ -22,6 +23,13 @@ namespace TelleR.Tools
 
         public void EnsureInitialized()
         {
+            if (!transformStored)
+            {
+                originalPosition = transform.position;
+                originalRotation = transform.rotation;
+                transformStored = true;
+            }
+
             MeshFilter meshFilter = GetComponent<MeshFilter>();
             if (meshFilter == null)
                 return;
@@ -31,12 +39,6 @@ namespace TelleR.Tools
 
             if (originalMesh == null)
                 return;
-
-            if (!rotationStored)
-            {
-                originalRotation = transform.rotation;
-                rotationStored = true;
-            }
 
             if (workingMesh == null)
             {
@@ -51,16 +53,18 @@ namespace TelleR.Tools
         {
             EnsureInitialized();
 
-            MeshFilter meshFilter = GetComponent<MeshFilter>();
-            if (meshFilter == null || workingMesh == null)
-                return;
-
             Transform t = transform;
-
             Vector3 currentPivotWorld = t.position;
             Vector3 deltaWorld = targetPivotWorld - currentPivotWorld;
             if (deltaWorld.sqrMagnitude <= 0f)
                 return;
+
+            MeshFilter meshFilter = GetComponent<MeshFilter>();
+            if (meshFilter == null || workingMesh == null)
+            {
+                t.position = targetPivotWorld;
+                return;
+            }
 
             Vector3 deltaLocal = t.InverseTransformVector(deltaWorld);
 
@@ -88,10 +92,15 @@ namespace TelleR.Tools
         {
             EnsureInitialized();
 
-            if (workingMesh == null)
-                return;
-
             Transform t = transform;
+
+            MeshFilter meshFilter = GetComponent<MeshFilter>();
+            if (meshFilter == null || workingMesh == null)
+            {
+                t.rotation = targetWorldRotation;
+                return;
+            }
+
             Quaternion currentRot = t.rotation;
             Quaternion deltaRot = Quaternion.Inverse(currentRot) * targetWorldRotation;
 
@@ -113,9 +122,9 @@ namespace TelleR.Tools
                 normals[i] = inverseRot * normals[i];
             workingMesh.normals = normals;
 
-            if (workingMesh.tangents != null && workingMesh.tangents.Length > 0)
+            Vector4[] tangents = workingMesh.tangents;
+            if (tangents != null && tangents.Length > 0)
             {
-                Vector4[] tangents = workingMesh.tangents;
                 for (int i = 0; i < tangents.Length; i++)
                 {
                     Vector3 tan = new Vector3(tangents[i].x, tangents[i].y, tangents[i].z);
@@ -150,27 +159,43 @@ namespace TelleR.Tools
             SetPivotRotation(targetRot);
         }
 
-        public Bounds GetCurrentLocalBounds()
+        public bool TryGetCurrentLocalBounds(out Bounds bounds)
         {
             MeshFilter meshFilter = GetComponent<MeshFilter>();
             Mesh mesh = meshFilter != null ? meshFilter.sharedMesh : null;
             if (mesh == null)
-                return new Bounds(Vector3.zero, Vector3.zero);
+            {
+                bounds = default;
+                return false;
+            }
 
-            return mesh.bounds;
+            bounds = mesh.bounds;
+            return true;
+        }
+
+        public Bounds GetCurrentLocalBounds()
+        {
+            Bounds b;
+            if (TryGetCurrentLocalBounds(out b))
+                return b;
+
+            return new Bounds(Vector3.zero, Vector3.zero);
         }
 
         public void RestoreOriginalMesh()
         {
             MeshFilter meshFilter = GetComponent<MeshFilter>();
-            if (meshFilter == null)
-                return;
+            if (meshFilter != null)
+            {
+                if (originalMesh != null)
+                    meshFilter.sharedMesh = originalMesh;
+            }
 
-            if (originalMesh != null)
-                meshFilter.sharedMesh = originalMesh;
-
-            if (rotationStored)
+            if (transformStored)
+            {
+                transform.position = originalPosition;
                 transform.rotation = originalRotation;
+            }
 
             if (workingMesh != null)
             {
@@ -178,7 +203,7 @@ namespace TelleR.Tools
                 workingMesh = null;
             }
 
-            rotationStored = false;
+            transformStored = false;
             RefreshMeshCollider();
         }
 
@@ -191,7 +216,10 @@ namespace TelleR.Tools
             MeshFilter meshFilter = GetComponent<MeshFilter>();
             Mesh mesh = meshFilter != null ? meshFilter.sharedMesh : null;
             if (mesh == null)
+            {
+                meshCollider.sharedMesh = null;
                 return;
+            }
 
             meshCollider.sharedMesh = null;
             meshCollider.sharedMesh = mesh;

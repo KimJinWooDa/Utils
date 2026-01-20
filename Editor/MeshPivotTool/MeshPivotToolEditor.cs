@@ -2,6 +2,7 @@
 using UnityEditor;
 using UnityEngine;
 using System.Collections.Generic;
+using TelleR.Tools;
 
 namespace TelleR.Tools.Editor
 {
@@ -306,6 +307,22 @@ namespace TelleR.Tools.Editor
 
             GUILayout.Space(8);
 
+            Bounds b;
+            bool hasBounds = tool.TryGetCurrentLocalBounds(out b);
+
+            if (!hasBounds)
+            {
+                GUIStyle info = new GUIStyle(EditorStyles.miniLabel)
+                {
+                    alignment = TextAnchor.MiddleCenter,
+                    normal = { textColor = Color.gray }
+                };
+                EditorGUILayout.LabelField("MeshFilter not found. Presets require a mesh.", info);
+                GUILayout.Space(10);
+                EditorGUILayout.EndVertical();
+                return;
+            }
+
             float btnSize = 44f;
             float smallBtn = 38f;
             float spacing = 4f;
@@ -463,7 +480,6 @@ namespace TelleR.Tools.Editor
                 {
                     GUILayout.Space(10);
 
-                    EditorGUI.BeginChangeCheck();
                     customEuler = EditorGUILayout.Vector3Field(GUIContent.none, customEuler);
 
                     if (GUILayout.Button("Set", GUILayout.Width(40)))
@@ -482,9 +498,7 @@ namespace TelleR.Tools.Editor
                 {
                     GUILayout.Space(10);
                     if (GUILayout.Button("Get Current", GUILayout.Height(22)))
-                    {
                         customEuler = tool.transform.eulerAngles;
-                    }
                     GUILayout.Space(10);
                 }
             }
@@ -520,7 +534,6 @@ namespace TelleR.Tools.Editor
                 Color oldBg = GUI.backgroundColor;
 
                 GUI.backgroundColor = AccentColor;
-                GUI.enabled = tool.HasWorkingMesh;
                 if (GUILayout.Button("✓  Apply & Remove", applyStyle))
                 {
                     ApplyAndRemove(tool);
@@ -536,14 +549,12 @@ namespace TelleR.Tools.Editor
                 {
                     RevertAndRemove(tool);
                     GUI.backgroundColor = oldBg;
-                    GUI.enabled = true;
                     GUILayout.Space(10);
                     EditorGUILayout.EndVertical();
                     return;
                 }
 
                 GUI.backgroundColor = oldBg;
-                GUI.enabled = true;
 
                 GUILayout.Space(10);
             }
@@ -557,7 +568,11 @@ namespace TelleR.Tools.Editor
         private void ApplyPreset(MeshPivotTool tool, PivotPreset preset)
         {
             tool.EnsureInitialized();
-            Bounds b = tool.GetCurrentLocalBounds();
+
+            Bounds b;
+            if (!tool.TryGetCurrentLocalBounds(out b))
+                return;
+
             Vector3 point = b.center;
 
             switch (preset)
@@ -644,7 +659,10 @@ namespace TelleR.Tools.Editor
 
         private void DrawBoundsWire(MeshPivotTool tool)
         {
-            Bounds b = tool.GetCurrentLocalBounds();
+            Bounds b;
+            if (!tool.TryGetCurrentLocalBounds(out b))
+                return;
+
             Transform t = tool.transform;
 
             Color wireColor = currentMode == HandleMode.Rotation ? RotationColor : AccentColor;
