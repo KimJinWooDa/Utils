@@ -1,7 +1,7 @@
 #if UNITY_EDITOR
 
-using UnityEditor; 
-using UnityEngine; 
+using UnityEditor;
+using UnityEngine;
 using System.Collections.Generic;
 
 namespace TelleR.Tools.Editor
@@ -34,24 +34,32 @@ namespace TelleR.Tools.Editor
             if (tool != null)
             {
                 tool.EnsureInitialized();
-                customEuler = tool.transform.eulerAngles;
             }
-
             CacheVertices(tool);
+        }
+
+        private Mesh GetMeshFromTool(MeshPivotTool tool)
+        {
+            if (tool == null) return null;
+            if (tool.UseSkinnedMesh)
+            {
+                SkinnedMeshRenderer smr = tool.GetComponent<SkinnedMeshRenderer>();
+                return smr != null ? smr.sharedMesh : null;
+            }
+            MeshFilter mf = tool.GetComponent<MeshFilter>();
+            return mf != null ? mf.sharedMesh : null;
         }
 
         private void CacheVertices(MeshPivotTool tool)
         {
             if (tool == null) return;
-            MeshFilter mf = tool.GetComponent<MeshFilter>();
-            if (mf == null || mf.sharedMesh == null)
+            Mesh mesh = GetMeshFromTool(tool);
+            if (mesh == null)
             {
                 cachedVertices = null;
                 cachedMeshId = 0;
                 return;
             }
-
-            Mesh mesh = mf.sharedMesh;
             if (cachedMeshId == mesh.GetInstanceID() && cachedVertices != null) return;
             HashSet<Vector3> uniqueSet = new HashSet<Vector3>(mesh.vertices);
             cachedVertices = new Vector3[uniqueSet.Count];
@@ -64,7 +72,7 @@ namespace TelleR.Tools.Editor
             MeshPivotTool tool = target as MeshPivotTool;
             if (tool == null) return;
             serializedObject.Update();
-            DrawHeader();
+            DrawHeader(tool);
             EditorGUILayout.Space(6);
             DrawModeToggle();
             EditorGUILayout.Space(6);
@@ -86,6 +94,7 @@ namespace TelleR.Tools.Editor
             CacheVertices(tool);
             Event e = Event.current;
             bool ctrlHeld = e.control || e.command;
+
             if (e.type == EventType.KeyDown && e.keyCode == KeyCode.R && !e.control && !e.shift && !e.alt)
             {
                 currentMode = currentMode == HandleMode.Position ? HandleMode.Rotation : HandleMode.Position;
@@ -98,8 +107,10 @@ namespace TelleR.Tools.Editor
                 Vector3 snappedVertex;
                 if (TryGetNearestVertex(tool, e.mousePosition, out snappedVertex))
                 {
+                    Vector3 deltaWorld = snappedVertex - tool.transform.position;
+                    Vector3 deltaLocal = tool.transform.InverseTransformVector(deltaWorld);
                     RecordPivotChange(tool, "Vertex Snap Pivot");
-                    tool.MovePivotToWorld(snappedVertex);
+                    tool.SetPivotToLocalPoint(deltaLocal);
                     MarkDirty(tool);
                     e.Use();
                     return;
@@ -125,20 +136,23 @@ namespace TelleR.Tools.Editor
                 {
                     float snap = tool.Snap;
                     if (snap > 0f) newPivotWorld = SnapWorld(newPivotWorld, snap);
+                    Vector3 deltaWorld = newPivotWorld - pivotWorld;
+                    Vector3 deltaLocal = t.InverseTransformVector(deltaWorld);
                     RecordPivotChange(tool, "Move Pivot");
-                    tool.MovePivotToWorld(newPivotWorld);
+                    tool.SetPivotToLocalPoint(deltaLocal);
                     MarkDirty(tool);
                 }
             }
             else if (currentMode == HandleMode.Rotation)
             {
                 EditorGUI.BeginChangeCheck();
-                Quaternion newRot = Handles.RotationHandle(t.rotation, t.position);
+                Quaternion handleRot = t.rotation;
+                Quaternion newRot = Handles.RotationHandle(handleRot, t.position);
                 if (EditorGUI.EndChangeCheck())
                 {
+                    Quaternion deltaRot = Quaternion.Inverse(handleRot) * newRot;
                     RecordPivotChange(tool, "Rotate Pivot");
-                    tool.SetPivotRotation(newRot);
-                    customEuler = newRot.eulerAngles;
+                    tool.RotatePivotBy(deltaRot);
                     MarkDirty(tool);
                 }
             }
@@ -165,7 +179,6 @@ namespace TelleR.Tools.Editor
                 GUI.backgroundColor = oldBg;
                 GUILayout.Space(10);
             }
-
             GUILayout.Space(4);
             GUIStyle hint = new GUIStyle(EditorStyles.miniLabel)
                 { alignment = TextAnchor.MiddleCenter, normal = { textColor = Color.gray } };
@@ -194,7 +207,6 @@ namespace TelleR.Tools.Editor
                     found = true;
                 }
             }
-
             return found;
         }
 
@@ -211,13 +223,14 @@ namespace TelleR.Tools.Editor
             }
         }
 
-        private void DrawHeader()
+        private void DrawHeader(MeshPivotTool tool)
         {
             Rect rect = GUILayoutUtility.GetRect(1f, 32f);
             EditorGUI.DrawRect(rect, HeaderBg);
+            string meshType = tool.UseSkinnedMesh ? "SKINNED" : "MESH";
             GUIStyle titleStyle = new GUIStyle(EditorStyles.boldLabel)
                 { fontSize = 13, alignment = TextAnchor.MiddleCenter, normal = { textColor = AccentColor } };
-            EditorGUI.LabelField(rect, "◈ PIVOT EDITOR", titleStyle);
+            EditorGUI.LabelField(rect, $"◈ PIVOT EDITOR ({meshType})", titleStyle);
         }
 
         private void DrawSnapSlider(MeshPivotTool tool)
@@ -237,12 +250,10 @@ namespace TelleR.Tools.Editor
                     tool.Snap = newSnap;
                     EditorUtility.SetDirty(tool);
                 }
-
                 string label = tool.Snap > 0.001f ? tool.Snap.ToString("0.##") : "Off";
                 GUILayout.Label(label, GUILayout.Width(32));
                 GUILayout.Space(10);
             }
-
             GUILayout.Space(8);
             EditorGUILayout.EndVertical();
         }
@@ -260,6 +271,7 @@ namespace TelleR.Tools.Editor
             float spacing = 4f;
             GUIStyle cubeBtn = new GUIStyle(GUI.skin.button)
                 { fontSize = 9, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
+
             using (new EditorGUILayout.HorizontalScope())
             {
                 GUILayout.FlexibleSpace();
@@ -267,7 +279,6 @@ namespace TelleR.Tools.Editor
                     ApplyPreset(tool, PivotPreset.Top);
                 GUILayout.FlexibleSpace();
             }
-
             GUILayout.Space(spacing);
             using (new EditorGUILayout.HorizontalScope())
             {
@@ -276,7 +287,6 @@ namespace TelleR.Tools.Editor
                     ApplyPreset(tool, PivotPreset.Back);
                 GUILayout.FlexibleSpace();
             }
-
             GUILayout.Space(spacing);
             using (new EditorGUILayout.HorizontalScope())
             {
@@ -294,7 +304,6 @@ namespace TelleR.Tools.Editor
                     ApplyPreset(tool, PivotPreset.Right);
                 GUILayout.FlexibleSpace();
             }
-
             GUILayout.Space(spacing);
             using (new EditorGUILayout.HorizontalScope())
             {
@@ -303,7 +312,6 @@ namespace TelleR.Tools.Editor
                     ApplyPreset(tool, PivotPreset.Front);
                 GUILayout.FlexibleSpace();
             }
-
             GUILayout.Space(spacing);
             using (new EditorGUILayout.HorizontalScope())
             {
@@ -312,7 +320,6 @@ namespace TelleR.Tools.Editor
                     ApplyPreset(tool, PivotPreset.Bottom);
                 GUILayout.FlexibleSpace();
             }
-
             GUILayout.Space(10);
             EditorGUILayout.EndVertical();
         }
@@ -326,6 +333,7 @@ namespace TelleR.Tools.Editor
             EditorGUILayout.LabelField("Pivot Rotation", sectionLabel);
             GUILayout.Space(8);
             GUIStyle dirBtn = new GUIStyle(GUI.skin.button) { fontSize = 10, fontStyle = FontStyle.Bold };
+
             using (new EditorGUILayout.HorizontalScope())
             {
                 GUILayout.Space(10);
@@ -335,14 +343,11 @@ namespace TelleR.Tools.Editor
                 {
                     RecordPivotChange(tool, "Align to World");
                     tool.AlignToWorld();
-                    customEuler = Vector3.zero;
                     MarkDirty(tool);
                 }
-
                 GUI.backgroundColor = oldBg;
                 GUILayout.Space(10);
             }
-
             GUILayout.Space(8);
             EditorGUILayout.LabelField("Forward Direction:", EditorStyles.miniBoldLabel);
             GUILayout.Space(4);
@@ -365,7 +370,6 @@ namespace TelleR.Tools.Editor
                     ApplyForwardPreset(tool, Vector3.back);
                 GUILayout.FlexibleSpace();
             }
-
             GUILayout.Space(10);
             eulerFoldout = EditorGUILayout.Foldout(eulerFoldout, "Custom Euler Angles", true);
             if (eulerFoldout)
@@ -374,31 +378,18 @@ namespace TelleR.Tools.Editor
                 using (new EditorGUILayout.HorizontalScope())
                 {
                     GUILayout.Space(10);
-                    EditorGUI.BeginChangeCheck();
                     customEuler = EditorGUILayout.Vector3Field(GUIContent.none, customEuler);
-                    if (GUILayout.Button("Set", GUILayout.Width(40)))
+                    if (GUILayout.Button("Apply", GUILayout.Width(50)))
                     {
+                        Quaternion targetRot = Quaternion.Euler(customEuler);
+                        Quaternion deltaRot = Quaternion.Inverse(tool.transform.rotation) * targetRot;
                         RecordPivotChange(tool, "Set Custom Rotation");
-                        tool.SetPivotRotation(Quaternion.Euler(customEuler));
+                        tool.RotatePivotBy(deltaRot);
                         MarkDirty(tool);
                     }
-
-                    GUILayout.Space(10);
-                }
-
-                GUILayout.Space(4);
-                using (new EditorGUILayout.HorizontalScope())
-                {
-                    GUILayout.Space(10);
-                    if (GUILayout.Button("Get Current", GUILayout.Height(22)))
-                    {
-                        customEuler = tool.transform.eulerAngles;
-                    }
-
                     GUILayout.Space(10);
                 }
             }
-
             GUILayout.Space(10);
             EditorGUILayout.EndVertical();
         }
@@ -407,7 +398,6 @@ namespace TelleR.Tools.Editor
         {
             RecordPivotChange(tool, $"Forward {direction}");
             tool.SetForwardDirection(direction);
-            customEuler = tool.transform.eulerAngles;
             MarkDirty(tool);
         }
 
@@ -430,7 +420,6 @@ namespace TelleR.Tools.Editor
                     EditorGUILayout.EndVertical();
                     return;
                 }
-
                 GUILayout.Space(6);
                 GUI.backgroundColor = DangerColor;
                 if (GUILayout.Button("✕ Revert", applyStyle))
@@ -442,12 +431,10 @@ namespace TelleR.Tools.Editor
                     EditorGUILayout.EndVertical();
                     return;
                 }
-
                 GUI.backgroundColor = oldBg;
                 GUI.enabled = true;
                 GUILayout.Space(10);
             }
-
             GUILayout.Space(10);
             EditorGUILayout.EndVertical();
         }
@@ -477,7 +464,6 @@ namespace TelleR.Tools.Editor
                 case PivotPreset.Front: point = new Vector3(b.center.x, b.center.y, b.max.z); break;
                 case PivotPreset.Back: point = new Vector3(b.center.x, b.center.y, b.min.z); break;
             }
-
             RecordPivotChange(tool, $"Pivot {preset}");
             tool.SetPivotToLocalPoint(point);
             MarkDirty(tool);
@@ -493,13 +479,16 @@ namespace TelleR.Tools.Editor
         private void RevertAndRemove(MeshPivotTool tool)
         {
             MeshFilter mf = tool.GetComponent<MeshFilter>();
+            SkinnedMeshRenderer smr = tool.GetComponent<SkinnedMeshRenderer>();
             MeshCollider mc = tool.GetComponent<MeshCollider>();
             if (mf != null) Undo.RecordObject(mf, "Revert Pivot");
+            if (smr != null) Undo.RecordObject(smr, "Revert Pivot");
             if (mc != null) Undo.RecordObject(mc, "Revert Pivot");
             Undo.RecordObject(tool, "Revert Pivot");
             Undo.RecordObject(tool.transform, "Revert Pivot");
             tool.RestoreOriginalMesh();
             if (mf != null) EditorUtility.SetDirty(mf);
+            if (smr != null) EditorUtility.SetDirty(smr);
             SafeDestroy(tool);
             SceneView.RepaintAll();
         }
@@ -509,9 +498,11 @@ namespace TelleR.Tools.Editor
             Undo.IncrementCurrentGroup();
             int group = Undo.GetCurrentGroup();
             MeshFilter mf = tool.GetComponent<MeshFilter>();
+            SkinnedMeshRenderer smr = tool.GetComponent<SkinnedMeshRenderer>();
             MeshCollider mc = tool.GetComponent<MeshCollider>();
-            Mesh mesh = mf != null ? mf.sharedMesh : null;
+            Mesh mesh = GetMeshFromTool(tool);
             if (mf != null) Undo.RecordObject(mf, name);
+            if (smr != null) Undo.RecordObject(smr, name);
             if (mc != null) Undo.RecordObject(mc, name);
             if (mesh != null) Undo.RecordObject(mesh, name);
             Undo.RecordObject(tool, name);
@@ -521,17 +512,19 @@ namespace TelleR.Tools.Editor
 
         private void MarkDirty(MeshPivotTool tool)
         {
+            Mesh mesh = GetMeshFromTool(tool);
             MeshFilter mf = tool.GetComponent<MeshFilter>();
-            Mesh mesh = mf != null ? mf.sharedMesh : null;
+            SkinnedMeshRenderer smr = tool.GetComponent<SkinnedMeshRenderer>();
             EditorUtility.SetDirty(tool);
             if (mf != null) EditorUtility.SetDirty(mf);
+            if (smr != null) EditorUtility.SetDirty(smr);
             if (mesh != null) EditorUtility.SetDirty(mesh);
             SceneView.RepaintAll();
         }
 
         private void DrawBoundsWire(MeshPivotTool tool)
         {
-            Bounds b = tool.GetCurrentLocalBounds();
+            Bounds b = tool.GetRenderedBounds();
             Transform t = tool.transform;
             Color wireColor = currentMode == HandleMode.Rotation ? RotationColor : AccentColor;
             Handles.color = new Color(wireColor.r, wireColor.g, wireColor.b, 0.6f);
@@ -555,8 +548,7 @@ namespace TelleR.Tools.Editor
             else if (ctrlHeld)
             {
                 text = "◈ Vertex Snap | Click to snap";
-                bgColor = new Color(VertexSnapColor.r * 0.3f, VertexSnapColor.g * 0.3f, VertexSnapColor.b * 0.3f,
-                    0.85f);
+                bgColor = new Color(VertexSnapColor.r * 0.3f, VertexSnapColor.g * 0.3f, VertexSnapColor.b * 0.3f, 0.85f);
                 textColor = VertexSnapColor;
             }
             else
@@ -565,7 +557,6 @@ namespace TelleR.Tools.Editor
                 bgColor = new Color(0, 0, 0, 0.7f);
                 textColor = Color.white;
             }
-
             Rect r = new Rect(10, 10, 280, 28);
             EditorGUI.DrawRect(r, bgColor);
             GUIStyle style = new GUIStyle(EditorStyles.boldLabel)
@@ -576,23 +567,24 @@ namespace TelleR.Tools.Editor
 
         private Vector3 SnapWorld(Vector3 world, float snap)
         {
-            return new Vector3(Mathf.Round(world.x / snap) * snap, Mathf.Round(world.y / snap) * snap,
+            return new Vector3(
+                Mathf.Round(world.x / snap) * snap,
+                Mathf.Round(world.y / snap) * snap,
                 Mathf.Round(world.z / snap) * snap);
         }
 
         private void SafeDestroy(Object obj)
         {
             if (obj == null) return;
-            int id = obj.GetInstanceID();
+            Object captured = obj;
             EditorApplication.delayCall += () =>
             {
-                Object o = EditorUtility.InstanceIDToObject(id);
-                if (o != null) Undo.DestroyObjectImmediate(o);
+                if (captured != null) Undo.DestroyObjectImmediate(captured);
             };
         }
 
         [MenuItem("CONTEXT/MeshFilter/Edit Mesh Pivot")]
-        private static void AddTool(MenuCommand command)
+        private static void AddToolFromMeshFilter(MenuCommand command)
         {
             MeshFilter mf = command.context as MeshFilter;
             if (mf == null) return;
@@ -602,8 +594,21 @@ namespace TelleR.Tools.Editor
                 Selection.activeObject = existing;
                 return;
             }
-
             Undo.AddComponent<MeshPivotTool>(mf.gameObject);
+        }
+
+        [MenuItem("CONTEXT/SkinnedMeshRenderer/Edit Mesh Pivot")]
+        private static void AddToolFromSkinnedMesh(MenuCommand command)
+        {
+            SkinnedMeshRenderer smr = command.context as SkinnedMeshRenderer;
+            if (smr == null) return;
+            MeshPivotTool existing = smr.GetComponent<MeshPivotTool>();
+            if (existing != null)
+            {
+                Selection.activeObject = existing;
+                return;
+            }
+            Undo.AddComponent<MeshPivotTool>(smr.gameObject);
         }
     }
 }
