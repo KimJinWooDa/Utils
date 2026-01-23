@@ -2,7 +2,7 @@ using UnityEngine;
 using UnityEditor;
 using System.IO;
 
-namespace TelleR.Editor
+namespace TelleR
 {
     [CustomEditor(typeof(MeshFilter))]
     [CanEditMultipleObjects]
