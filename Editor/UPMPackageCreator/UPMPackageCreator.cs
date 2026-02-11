@@ -519,6 +519,12 @@ namespace TelleR
 
         private void CreateStep2AddUI(VisualElement parent)
         {
+            var desc = new Label("Create a feature folder and drag files into it.");
+            desc.style.color = TextMuted;
+            desc.style.fontSize = 11;
+            desc.style.marginBottom = 10;
+            parent.Add(desc);
+
             var featureRow = new VisualElement();
             featureRow.style.flexDirection = FlexDirection.Row;
             featureRow.style.alignItems = Align.Center;
@@ -556,7 +562,7 @@ namespace TelleR
             dropIcon.style.marginBottom = 6;
             dropZone.Add(dropIcon);
 
-            dropLabel = new Label("Drop files here");
+            dropLabel = new Label("Drop scripts, materials, shaders here");
             dropLabel.style.unityTextAlign = TextAnchor.MiddleCenter;
             dropLabel.style.color = TextSecondary;
             dropLabel.style.fontSize = 13;
@@ -617,6 +623,12 @@ namespace TelleR
 
         private void CreateStep2ListUI(VisualElement parent)
         {
+            var desc = new Label("All feature folders in this package. Click to open in Explorer.");
+            desc.style.color = TextMuted;
+            desc.style.fontSize = 11;
+            desc.style.marginBottom = 10;
+            parent.Add(desc);
+
             var headerRow = new VisualElement();
             headerRow.style.flexDirection = FlexDirection.Row;
             headerRow.style.alignItems = Align.Center;
@@ -646,6 +658,12 @@ namespace TelleR
         private void CreateOrganizerUI(VisualElement parent)
         {
             organizerContainer = new VisualElement();
+
+            var desc = new Label("Move files between Editor (editor-only) and Runtime (included in build).");
+            desc.style.color = TextMuted;
+            desc.style.fontSize = 11;
+            desc.style.marginBottom = 10;
+            organizerContainer.Add(desc);
 
             var headerRow = new VisualElement();
             headerRow.style.flexDirection = FlexDirection.Row;
@@ -745,8 +763,15 @@ namespace TelleR
             devModeLabel.style.unityFontStyleAndWeight = FontStyle.Bold;
             devModeLabel.style.color = TextPrimary;
             devModeLabel.style.fontSize = 13;
-            devModeLabel.style.marginBottom = 8;
+            devModeLabel.style.marginBottom = 4;
             step3Container.Add(devModeLabel);
+
+            var devModeDesc = new Label("Dev = editable local folder  /  Deploy = read-only git URL for distribution");
+            devModeDesc.style.color = TextMuted;
+            devModeDesc.style.fontSize = 11;
+            devModeDesc.style.marginBottom = 8;
+            devModeDesc.style.whiteSpace = WhiteSpace.Normal;
+            step3Container.Add(devModeDesc);
 
             devModeStatus = new Label("");
             devModeStatus.style.fontSize = 12;
