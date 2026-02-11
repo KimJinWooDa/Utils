@@ -391,6 +391,24 @@ namespace TelleR
             return div;
         }
 
+        VisualElement CreateHelpLabel(string text)
+        {
+            var container = new VisualElement();
+            container.style.backgroundColor = new Color(AccentBlue.r, AccentBlue.g, AccentBlue.b, 0.08f);
+            SetRadius(container.style, RadiusSm);
+            SetPadding(container.style, 8, 12);
+            container.style.marginBottom = 12;
+            SetBorder(container.style, 1, new Color(AccentBlue.r, AccentBlue.g, AccentBlue.b, 0.15f));
+
+            var label = new Label(text);
+            label.style.fontSize = 12;
+            label.style.color = new Color(0.65f, 0.78f, 1.0f);
+            label.style.whiteSpace = WhiteSpace.Normal;
+            container.Add(label);
+
+            return container;
+        }
+
         // ─── Step 1 ───
 
         private void CreateStep1(VisualElement root)
@@ -519,10 +537,7 @@ namespace TelleR
 
         private void CreateStep2AddUI(VisualElement parent)
         {
-            var desc = new Label("Create a feature folder and drag files into it.");
-            desc.style.color = TextMuted;
-            desc.style.fontSize = 11;
-            desc.style.marginBottom = 10;
+            var desc = CreateHelpLabel("\u2139  기능 이름을 입력하고, 아래 영역에 파일을 드래그하여 추가합니다.");
             parent.Add(desc);
 
             var featureRow = new VisualElement();
@@ -562,7 +577,7 @@ namespace TelleR
             dropIcon.style.marginBottom = 6;
             dropZone.Add(dropIcon);
 
-            dropLabel = new Label("Drop scripts, materials, shaders here");
+            dropLabel = new Label("\uD83D\uDCC2  스크립트, 머티리얼, 셰이더 등을 여기에 드롭하세요");
             dropLabel.style.unityTextAlign = TextAnchor.MiddleCenter;
             dropLabel.style.color = TextSecondary;
             dropLabel.style.fontSize = 13;
@@ -623,10 +638,7 @@ namespace TelleR
 
         private void CreateStep2ListUI(VisualElement parent)
         {
-            var desc = new Label("All feature folders in this package. Click to open in Explorer.");
-            desc.style.color = TextMuted;
-            desc.style.fontSize = 11;
-            desc.style.marginBottom = 10;
+            var desc = CreateHelpLabel("\u2139  패키지에 등록된 기능 폴더 목록입니다. 클릭하면 탐색기에서 열립니다.");
             parent.Add(desc);
 
             var headerRow = new VisualElement();
@@ -659,10 +671,7 @@ namespace TelleR
         {
             organizerContainer = new VisualElement();
 
-            var desc = new Label("Move files between Editor (editor-only) and Runtime (included in build).");
-            desc.style.color = TextMuted;
-            desc.style.fontSize = 11;
-            desc.style.marginBottom = 10;
+            var desc = CreateHelpLabel("\u2139  파일을 Editor(에디터 전용) 또는 Runtime(빌드 포함) 폴더로 이동합니다.");
             organizerContainer.Add(desc);
 
             var headerRow = new VisualElement();
@@ -766,11 +775,7 @@ namespace TelleR
             devModeLabel.style.marginBottom = 4;
             step3Container.Add(devModeLabel);
 
-            var devModeDesc = new Label("Dev = editable local folder  /  Deploy = read-only git URL for distribution");
-            devModeDesc.style.color = TextMuted;
-            devModeDesc.style.fontSize = 11;
-            devModeDesc.style.marginBottom = 8;
-            devModeDesc.style.whiteSpace = WhiteSpace.Normal;
+            var devModeDesc = CreateHelpLabel("\u2139  Dev = 로컬 폴더에서 직접 수정  /  Deploy = git URL로 배포 (읽기 전용)");
             step3Container.Add(devModeDesc);
 
             devModeStatus = new Label("");
