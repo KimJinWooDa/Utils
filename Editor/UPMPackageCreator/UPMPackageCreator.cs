@@ -15,7 +15,9 @@ namespace TelleR
         private enum PendingKind
         {
             Script,
-            Image
+            Image,
+            Resource,
+            Shader
         }
 
         private enum PendingPlacement
@@ -44,10 +46,15 @@ namespace TelleR
         private TextField newFeatureNameField;
 
         private VisualElement step1Container;
+        private VisualElement step1Body;
+        private Label step1Arrow;
+        private Label step1SummaryLabel;
+        private bool step1Collapsed = true;
         private VisualElement step2Container;
         private VisualElement step3Container;
         private VisualElement featureListContainer;
         private VisualElement dropZone;
+        private Label dropLabel;
         private VisualElement pendingListContainer;
         private Button confirmButton;
 
@@ -63,33 +70,75 @@ namespace TelleR
         private string currentPackagePath;
         private readonly List<PendingItem> pendingItems = new List<PendingItem>();
 
+        private VisualElement step2TabsRow;
+        private VisualElement step2TabAdd;
+        private VisualElement step2TabList;
+        private VisualElement step2TabOrganize;
+        private Button step2TabAddBtn;
+        private Button step2TabListBtn;
+        private Button step2TabOrganizeBtn;
+
+        private enum Step2Tab { Add, List, Organize }
+
+        private enum FeatureLocation
+        {
+            EditorFeature,
+            RuntimeFeature,
+            EditorResources,
+            RuntimeResources
+        }
+
+        private class FeatureEntry
+        {
+            public string FileName;
+            public string FullPath;
+            public FeatureLocation Location;
+            public string Tag;
+            public Color TagColor;
+        }
+
+        // ─── Design Tokens ───
+        static readonly Color BgDeep       = new Color(0.16f, 0.16f, 0.18f);
+        static readonly Color BgCard       = new Color(0.21f, 0.21f, 0.24f);
+        static readonly Color BgCardHover  = new Color(0.24f, 0.24f, 0.28f);
+        static readonly Color BgInput      = new Color(0.18f, 0.18f, 0.21f);
+        static readonly Color Border       = new Color(0.30f, 0.30f, 0.35f);
+        static readonly Color BorderLight  = new Color(0.36f, 0.36f, 0.42f);
+        static readonly Color TextPrimary  = new Color(0.95f, 0.95f, 0.97f);
+        static readonly Color TextSecondary= new Color(0.70f, 0.70f, 0.76f);
+        static readonly Color TextMuted    = new Color(0.52f, 0.52f, 0.58f);
+        static readonly Color AccentBlue   = new Color(0.40f, 0.60f, 1.0f);
+        static readonly Color AccentGreen  = new Color(0.35f, 0.85f, 0.55f);
+        static readonly Color AccentRed    = new Color(0.95f, 0.40f, 0.40f);
+        static readonly Color AccentAmber  = new Color(1.0f, 0.80f, 0.30f);
+        static readonly Color AccentPurple = new Color(0.70f, 0.50f, 1.0f);
+        static readonly Color AccentCyan   = new Color(0.35f, 0.88f, 0.90f);
+        const int RadiusLg = 8;
+        const int RadiusMd = 6;
+        const int RadiusSm = 4;
+        const int RadiusXs = 3;
+
         [MenuItem("Tools/TelleR/Tool/UPM Package Creator")]
         public static void ShowWindow()
         {
             var window = GetWindow<UPMPackageCreator>();
             window.titleContent = new GUIContent("UPM Package Creator");
-            window.minSize = new Vector2(520, 780);
+            window.minSize = new Vector2(480, 720);
         }
 
         public void CreateGUI()
         {
             var root = rootVisualElement;
             root.Clear();
+            root.style.backgroundColor = BgDeep;
 
             var pageScroll = new ScrollView();
             pageScroll.style.flexGrow = 1;
-            pageScroll.style.paddingTop = 10;
-            pageScroll.style.paddingLeft = 15;
-            pageScroll.style.paddingRight = 15;
-            pageScroll.style.paddingBottom = 10;
+            pageScroll.style.paddingTop = 20;
+            pageScroll.style.paddingLeft = 20;
+            pageScroll.style.paddingRight = 20;
+            pageScroll.style.paddingBottom = 20;
             root.Add(pageScroll);
-
-            var title = new Label("UPM Package Creator");
-            title.style.fontSize = 20;
-            title.style.unityFontStyleAndWeight = FontStyle.Bold;
-            title.style.marginBottom = 15;
-            title.style.alignSelf = Align.Center;
-            pageScroll.Add(title);
 
             CreateStep1(pageScroll);
             CreateStep2(pageScroll);
@@ -99,64 +148,309 @@ namespace TelleR
             TryLoadLastPackage();
         }
 
-        
+        // ─── UI Builder Helpers ───
+
+        void SetRadius(IStyle s, int r)
+        {
+            s.borderTopLeftRadius = r; s.borderTopRightRadius = r;
+            s.borderBottomLeftRadius = r; s.borderBottomRightRadius = r;
+        }
+
+        void SetBorder(IStyle s, float w, Color c)
+        {
+            s.borderTopWidth = w; s.borderBottomWidth = w;
+            s.borderLeftWidth = w; s.borderRightWidth = w;
+            s.borderTopColor = c; s.borderBottomColor = c;
+            s.borderLeftColor = c; s.borderRightColor = c;
+        }
+
+        void SetPadding(IStyle s, int v, int h)
+        {
+            s.paddingTop = v; s.paddingBottom = v;
+            s.paddingLeft = h; s.paddingRight = h;
+        }
+
+        VisualElement CreateCard(VisualElement parent, string stepNum, string title,
+            bool collapsible = false, bool startCollapsed = false,
+            System.Action<VisualElement, Label, Label> onHeaderCreated = null)
+        {
+            var card = new VisualElement();
+            card.style.marginBottom = 16;
+            card.style.backgroundColor = BgCard;
+            SetRadius(card.style, RadiusLg);
+            SetBorder(card.style, 1, Border);
+            card.style.overflow = Overflow.Hidden;
+            parent.Add(card);
+
+            var header = new VisualElement();
+            header.style.flexDirection = FlexDirection.Row;
+            header.style.alignItems = Align.Center;
+            SetPadding(header.style, 14, 18);
+            header.style.backgroundColor = new Color(0.10f, 0.105f, 0.13f);
+            header.style.borderBottomWidth = 1;
+            header.style.borderBottomColor = Border;
+            card.Add(header);
+
+            Label arrow = null;
+            if (collapsible)
+            {
+                arrow = new Label(startCollapsed ? "\u25B6" : "\u25BC");
+                arrow.style.fontSize = 11;
+                arrow.style.color = TextSecondary;
+                arrow.style.marginRight = 8;
+                arrow.style.unityTextAlign = TextAnchor.MiddleCenter;
+                header.Add(arrow);
+            }
+
+            if (!string.IsNullOrEmpty(stepNum))
+            {
+                var badge = new Label(stepNum);
+                badge.style.fontSize = 11;
+                badge.style.unityFontStyleAndWeight = FontStyle.Bold;
+                badge.style.color = Color.white;
+                badge.style.backgroundColor = AccentBlue;
+                badge.style.paddingLeft = 10;
+                badge.style.paddingRight = 10;
+                badge.style.paddingTop = 4;
+                badge.style.paddingBottom = 4;
+                SetRadius(badge.style, RadiusSm);
+                badge.style.marginRight = 12;
+                header.Add(badge);
+            }
+
+            var titleLabel = new Label(title);
+            titleLabel.style.fontSize = 15;
+            titleLabel.style.unityFontStyleAndWeight = FontStyle.Bold;
+            titleLabel.style.color = TextPrimary;
+            header.Add(titleLabel);
+
+            Label summaryLabel = null;
+            if (collapsible)
+            {
+                summaryLabel = new Label("");
+                summaryLabel.style.fontSize = 12;
+                summaryLabel.style.color = TextMuted;
+                summaryLabel.style.marginLeft = 12;
+                summaryLabel.style.flexGrow = 1;
+                summaryLabel.style.unityTextAlign = TextAnchor.MiddleRight;
+                header.Add(summaryLabel);
+            }
+
+            var body = new VisualElement();
+            SetPadding(body.style, 16, 18);
+            card.Add(body);
+
+            if (collapsible)
+            {
+                if (startCollapsed)
+                    body.style.display = DisplayStyle.None;
+
+                header.style.cursor = new Cursor();
+                header.RegisterCallback<ClickEvent>(evt =>
+                {
+                    bool isHidden = body.style.display == DisplayStyle.None;
+                    body.style.display = isHidden ? DisplayStyle.Flex : DisplayStyle.None;
+                    if (arrow != null)
+                        arrow.text = isHidden ? "\u25BC" : "\u25B6";
+                });
+
+                onHeaderCreated?.Invoke(header, arrow, summaryLabel);
+            }
+
+            return body;
+        }
+
+        TextField CreateStyledField(VisualElement parent, string label, string defaultValue)
+        {
+            var row = new VisualElement();
+            row.style.flexDirection = FlexDirection.Row;
+            row.style.alignItems = Align.Center;
+            row.style.marginBottom = 8;
+
+            var lbl = new Label(label);
+            lbl.style.width = 120;
+            lbl.style.minWidth = 120;
+            lbl.style.color = TextSecondary;
+            lbl.style.fontSize = 13;
+            row.Add(lbl);
+
+            var field = new TextField();
+            field.value = defaultValue;
+            field.style.flexGrow = 1;
+            field.style.height = 30;
+            field.style.minHeight = 30;
+            row.Add(field);
+
+            parent.Add(row);
+            return field;
+        }
+
+        Button CreatePrimaryButton(string text, Action onClick)
+        {
+            var btn = new Button(onClick);
+            btn.text = text;
+            btn.style.height = 36;
+            btn.style.backgroundColor = AccentBlue;
+            btn.style.color = Color.white;
+            btn.style.unityFontStyleAndWeight = FontStyle.Bold;
+            btn.style.fontSize = 13;
+            SetRadius(btn.style, RadiusSm);
+            SetBorder(btn.style, 0, Color.clear);
+            btn.style.marginTop = 2;
+            btn.style.marginBottom = 2;
+            return btn;
+        }
+
+        Button CreateSecondaryButton(string text, Action onClick)
+        {
+            var btn = new Button(onClick);
+            btn.text = text;
+            btn.style.height = 36;
+            btn.style.backgroundColor = BgCardHover;
+            btn.style.color = TextPrimary;
+            btn.style.fontSize = 13;
+            SetRadius(btn.style, RadiusSm);
+            SetBorder(btn.style, 1, BorderLight);
+            btn.style.marginTop = 2;
+            btn.style.marginBottom = 2;
+            return btn;
+        }
+
+        Button CreateGhostButton(string text, Action onClick)
+        {
+            var btn = new Button(onClick);
+            btn.text = text;
+            btn.style.height = 28;
+            btn.style.backgroundColor = Color.clear;
+            btn.style.color = TextSecondary;
+            btn.style.fontSize = 12;
+            SetRadius(btn.style, RadiusXs);
+            SetBorder(btn.style, 1, Border);
+            btn.style.paddingLeft = 10;
+            btn.style.paddingRight = 10;
+            return btn;
+        }
+
+        Button CreateDangerButton(string text, Action onClick, int size = 24)
+        {
+            var btn = new Button(onClick);
+            btn.text = text;
+            btn.style.width = size;
+            btn.style.height = size;
+            btn.style.backgroundColor = new Color(AccentRed.r, AccentRed.g, AccentRed.b, 0.15f);
+            btn.style.color = AccentRed;
+            btn.style.fontSize = 11;
+            SetRadius(btn.style, RadiusXs);
+            SetBorder(btn.style, 1, new Color(AccentRed.r, AccentRed.g, AccentRed.b, 0.3f));
+            return btn;
+        }
+
+        Button CreateSmallButton(string text, Action onClick, Color color)
+        {
+            var btn = new Button(onClick);
+            btn.text = text;
+            btn.style.height = 22;
+            btn.style.backgroundColor = new Color(color.r, color.g, color.b, 0.12f);
+            btn.style.color = color;
+            btn.style.fontSize = 11;
+            btn.style.paddingLeft = 8;
+            btn.style.paddingRight = 8;
+            btn.style.marginRight = 4;
+            SetRadius(btn.style, RadiusXs);
+            SetBorder(btn.style, 1, new Color(color.r, color.g, color.b, 0.25f));
+            return btn;
+        }
+
+        VisualElement CreatePill(string text, Color color)
+        {
+            var pill = new VisualElement();
+            pill.style.backgroundColor = new Color(color.r, color.g, color.b, 0.15f);
+            SetRadius(pill.style, 20);
+            pill.style.paddingLeft = 8;
+            pill.style.paddingRight = 8;
+            pill.style.paddingTop = 2;
+            pill.style.paddingBottom = 2;
+            pill.style.marginRight = 6;
+
+            var label = new Label(text);
+            label.style.fontSize = 11;
+            label.style.color = color;
+            label.style.unityFontStyleAndWeight = FontStyle.Bold;
+            label.style.unityTextAlign = TextAnchor.MiddleCenter;
+            pill.Add(label);
+
+            return pill;
+        }
+
+        VisualElement CreateDivider()
+        {
+            var div = new VisualElement();
+            div.style.height = 1;
+            div.style.backgroundColor = Border;
+            div.style.marginTop = 12;
+            div.style.marginBottom = 12;
+            return div;
+        }
+
+        // ─── Step 1 ───
 
         private void CreateStep1(VisualElement root)
         {
-            step1Container = CreateStepContainer(root, "STEP 1", "패키지 생성 또는 불러오기");
+            step1Container = CreateCard(root, "1", "Package Setup",
+                collapsible: true, startCollapsed: true,
+                onHeaderCreated: (header, arrow, summary) =>
+                {
+                    step1Arrow = arrow;
+                    step1SummaryLabel = summary;
+                });
+            step1Body = step1Container;
 
-            packageNameField = CreateTextField(step1Container, "Package Name", "com.teller.util");
-            displayNameField = CreateTextField(step1Container, "Display Name", "TelleR Utilities");
-            descriptionField = CreateTextField(step1Container, "Description", "Unity utilities by TelleR");
-            authorField = CreateTextField(step1Container, "Author", "TelleR");
-            unityVersionField = CreateTextField(step1Container, "Min Unity Version", "2021.3");
+            packageNameField = CreateStyledField(step1Container, "Package Name", "com.teller.util");
+            displayNameField = CreateStyledField(step1Container, "Display Name", "TelleR Utilities");
+            descriptionField = CreateStyledField(step1Container, "Description", "Unity editor utilities by TelleR - Fast Clone, and more");
+            authorField = CreateStyledField(step1Container, "Author", "TelleR");
+            unityVersionField = CreateStyledField(step1Container, "Min Unity", "2021.3");
 
             var buttonRow = new VisualElement();
             buttonRow.style.flexDirection = FlexDirection.Row;
-            buttonRow.style.marginTop = 10;
+            buttonRow.style.marginTop = 12;
 
-            var createBtn = new Button(CreateNewPackage);
-            createBtn.text = "새 패키지 생성";
+            var createBtn = CreatePrimaryButton("New Package", CreateNewPackage);
             createBtn.style.flexGrow = 1;
-            createBtn.style.height = 32;
-            createBtn.style.marginRight = 5;
+            createBtn.style.marginRight = 8;
             buttonRow.Add(createBtn);
 
-            var loadBtn = new Button(LoadExistingPackage);
-            loadBtn.text = "기존 패키지 불러오기";
+            var loadBtn = CreateSecondaryButton("Load Existing", LoadExistingPackage);
             loadBtn.style.flexGrow = 1;
-            loadBtn.style.height = 32;
             buttonRow.Add(loadBtn);
 
             step1Container.Add(buttonRow);
 
             step1Status = new Label("");
-            step1Status.style.marginTop = 8;
+            step1Status.style.marginTop = 10;
             step1Status.style.unityTextAlign = TextAnchor.MiddleCenter;
+            step1Status.style.fontSize = 12;
             step1Container.Add(step1Status);
         }
 
-        private VisualElement step2TabsRow;
-        private VisualElement step2TabAdd;
-        private VisualElement step2TabList;
-        private VisualElement step2TabOrganize;
-        private Button step2TabAddBtn;
-        private Button step2TabListBtn;
-        private Button step2TabOrganizeBtn;
+        // ─── Step 2 ───
 
         private void CreateStep2(VisualElement root)
         {
-            step2Container = CreateStepContainer(root, "STEP 2", "기능 관리");
+            step2Container = CreateCard(root, "2", "Feature Manager");
 
             step2TabsRow = new VisualElement();
             step2TabsRow.style.flexDirection = FlexDirection.Row;
             step2TabsRow.style.alignItems = Align.Center;
-            step2TabsRow.style.marginBottom = 10;
+            step2TabsRow.style.marginBottom = 14;
+            step2TabsRow.style.backgroundColor = new Color(0.10f, 0.105f, 0.13f);
+            SetRadius(step2TabsRow.style, RadiusSm);
+            SetPadding(step2TabsRow.style, 3, 3);
             step2Container.Add(step2TabsRow);
 
-            step2TabAddBtn = CreateTabButton("추가", () => SelectStep2Tab(Step2Tab.Add));
-            step2TabListBtn = CreateTabButton("기능 목록", () => SelectStep2Tab(Step2Tab.List));
-            step2TabOrganizeBtn = CreateTabButton("수정", () => SelectStep2Tab(Step2Tab.Organize));
+            step2TabAddBtn = CreateTabButton("Add", () => SelectStep2Tab(Step2Tab.Add));
+            step2TabListBtn = CreateTabButton("Features", () => SelectStep2Tab(Step2Tab.List));
+            step2TabOrganizeBtn = CreateTabButton("Organize", () => SelectStep2Tab(Step2Tab.Organize));
 
             step2TabsRow.Add(step2TabAddBtn);
             step2TabsRow.Add(step2TabListBtn);
@@ -177,27 +471,22 @@ namespace TelleR
             SelectStep2Tab(Step2Tab.Add);
         }
 
-        private enum Step2Tab
-        {
-            Add,
-            List,
-            Organize
-        }
-
         private Button CreateTabButton(string text, Action onClick)
         {
             var btn = new Button(onClick);
             btn.text = text;
-            btn.style.height = 26;
-            btn.style.minHeight = 26;
-            btn.style.paddingLeft = 10;
-            btn.style.paddingRight = 10;
-            btn.style.marginRight = 6;
-            btn.style.borderTopLeftRadius = 6;
-            btn.style.borderTopRightRadius = 6;
-            btn.style.borderBottomLeftRadius = 6;
-            btn.style.borderBottomRightRadius = 6;
-            btn.style.backgroundColor = new Color(0.20f, 0.20f, 0.20f);
+            btn.style.height = 30;
+            btn.style.minHeight = 30;
+            btn.style.paddingLeft = 16;
+            btn.style.paddingRight = 16;
+            btn.style.marginRight = 2;
+            btn.style.flexGrow = 1;
+            SetRadius(btn.style, RadiusXs);
+            SetBorder(btn.style, 0, Color.clear);
+            btn.style.backgroundColor = Color.clear;
+            btn.style.color = TextMuted;
+            btn.style.fontSize = 13;
+            btn.style.unityFontStyleAndWeight = FontStyle.Bold;
             return btn;
         }
 
@@ -223,51 +512,63 @@ namespace TelleR
 
         private void SetTabSelected(Button button, bool selected)
         {
-            button.style.backgroundColor = selected ? new Color(0.24f, 0.40f, 0.70f) : new Color(0.20f, 0.20f, 0.20f);
-            button.style.color = Color.white;
+            button.style.backgroundColor = selected ? new Color(AccentBlue.r, AccentBlue.g, AccentBlue.b, 0.20f) : Color.clear;
+            button.style.color = selected ? AccentBlue : TextMuted;
         }
+
+        // ─── Step 2: Add Tab ───
 
         private void CreateStep2AddUI(VisualElement parent)
         {
-            var addRow = new VisualElement();
-            addRow.style.flexDirection = FlexDirection.Row;
-            addRow.style.alignItems = Align.Center;
-            addRow.style.marginBottom = 10;
+            var featureRow = new VisualElement();
+            featureRow.style.flexDirection = FlexDirection.Row;
+            featureRow.style.alignItems = Align.Center;
+            featureRow.style.marginBottom = 12;
 
-            var featureLabel = new Label("기능 이름");
-            featureLabel.style.width = 70;
-            parent.Add(addRow);
-            addRow.Add(featureLabel);
+            var featureLabel = new Label("Feature");
+            featureLabel.style.color = TextSecondary;
+            featureLabel.style.fontSize = 13;
+            featureLabel.style.width = 60;
+            featureRow.Add(featureLabel);
 
             newFeatureNameField = new TextField();
             newFeatureNameField.value = "";
             newFeatureNameField.style.flexGrow = 1;
-            newFeatureNameField.style.height = 24;
-            newFeatureNameField.style.minHeight = 24;
-            addRow.Add(newFeatureNameField);
+            newFeatureNameField.style.height = 30;
+            newFeatureNameField.style.minHeight = 30;
+            featureRow.Add(newFeatureNameField);
 
+            parent.Add(featureRow);
+
+            // Drop zone
             dropZone = new VisualElement();
-            dropZone.style.height = 120;
-            dropZone.style.backgroundColor = new Color(0.15f, 0.15f, 0.15f);
-            dropZone.style.borderTopLeftRadius = 10;
-            dropZone.style.borderTopRightRadius = 10;
-            dropZone.style.borderBottomLeftRadius = 10;
-            dropZone.style.borderBottomRightRadius = 10;
-            dropZone.style.borderTopWidth = 2;
-            dropZone.style.borderBottomWidth = 2;
-            dropZone.style.borderLeftWidth = 2;
-            dropZone.style.borderRightWidth = 2;
-            dropZone.style.borderTopColor = new Color(0.4f, 0.4f, 0.4f);
-            dropZone.style.borderBottomColor = new Color(0.4f, 0.4f, 0.4f);
-            dropZone.style.borderLeftColor = new Color(0.4f, 0.4f, 0.4f);
-            dropZone.style.borderRightColor = new Color(0.4f, 0.4f, 0.4f);
+            dropZone.style.minHeight = 130;
+            dropZone.style.backgroundColor = new Color(0.10f, 0.105f, 0.13f);
+            SetRadius(dropZone.style, RadiusMd);
+            SetBorder(dropZone.style, 2, Border);
             dropZone.style.justifyContent = Justify.Center;
             dropZone.style.alignItems = Align.Center;
+            SetPadding(dropZone.style, 20, 20);
 
-            var dropLabel = new Label("여기에 .cs / 이미지(.png/.jpg 등)를 드래그하세요\n\nEditor/Runtime 자동 분류 + Resources 폴더 자동 + meta 자동");
+            var dropIcon = new Label("+");
+            dropIcon.style.fontSize = 28;
+            dropIcon.style.color = TextMuted;
+            dropIcon.style.unityTextAlign = TextAnchor.MiddleCenter;
+            dropIcon.style.marginBottom = 6;
+            dropZone.Add(dropIcon);
+
+            dropLabel = new Label("Drop files here");
             dropLabel.style.unityTextAlign = TextAnchor.MiddleCenter;
-            dropLabel.style.color = new Color(0.65f, 0.65f, 0.65f);
+            dropLabel.style.color = TextSecondary;
+            dropLabel.style.fontSize = 13;
             dropZone.Add(dropLabel);
+
+            var dropHint = new Label(".cs  /  Image  /  Material  /  ScriptableObject  /  Shader");
+            dropHint.style.unityTextAlign = TextAnchor.MiddleCenter;
+            dropHint.style.color = TextMuted;
+            dropHint.style.fontSize = 11;
+            dropHint.style.marginTop = 4;
+            dropZone.Add(dropHint);
 
             dropZone.RegisterCallback<DragEnterEvent>(OnDragEnter);
             dropZone.RegisterCallback<DragLeaveEvent>(OnDragLeave);
@@ -276,70 +577,60 @@ namespace TelleR
 
             parent.Add(dropZone);
 
+            // Pending list
             pendingListContainer = new VisualElement();
-            pendingListContainer.style.marginTop = 10;
-            pendingListContainer.style.backgroundColor = new Color(0.12f, 0.12f, 0.12f);
-            pendingListContainer.style.borderTopLeftRadius = 8;
-            pendingListContainer.style.borderTopRightRadius = 8;
-            pendingListContainer.style.borderBottomLeftRadius = 8;
-            pendingListContainer.style.borderBottomRightRadius = 8;
-            pendingListContainer.style.paddingTop = 8;
-            pendingListContainer.style.paddingBottom = 8;
-            pendingListContainer.style.paddingLeft = 10;
-            pendingListContainer.style.paddingRight = 10;
+            pendingListContainer.style.marginTop = 12;
             pendingListContainer.style.display = DisplayStyle.None;
             parent.Add(pendingListContainer);
 
-            confirmButton = new Button(ConfirmAddItems);
-            confirmButton.text = "추가 확정";
-            confirmButton.style.height = 36;
-            confirmButton.style.marginTop = 10;
-            confirmButton.style.backgroundColor = new Color(0.20f, 0.55f, 0.30f);
+            // Confirm button
+            confirmButton = CreatePrimaryButton("Confirm & Add", ConfirmAddItems);
+            confirmButton.style.backgroundColor = AccentGreen;
+            confirmButton.style.marginTop = 8;
             confirmButton.style.display = DisplayStyle.None;
             parent.Add(confirmButton);
 
+            // Bottom actions
             var bottomRow = new VisualElement();
             bottomRow.style.flexDirection = FlexDirection.Row;
             bottomRow.style.marginTop = 10;
 
-            var openFolderBtn = new Button(OpenPackageFolder);
-            openFolderBtn.text = "패키지 폴더 열기";
-            openFolderBtn.style.height = 28;
+            var openFolderBtn = CreateGhostButton("Open Folder", OpenPackageFolder);
             openFolderBtn.style.flexGrow = 1;
             openFolderBtn.style.marginRight = 6;
             bottomRow.Add(openFolderBtn);
 
-            var clearPendingBtn = new Button(ClearPending);
-            clearPendingBtn.text = "대기 비우기";
-            clearPendingBtn.style.height = 28;
-            clearPendingBtn.style.width = 92;
+            var clearPendingBtn = CreateGhostButton("Clear Queue", ClearPending);
+            clearPendingBtn.style.width = 100;
             bottomRow.Add(clearPendingBtn);
 
             parent.Add(bottomRow);
 
-            step2Status = new Label("← STEP 1을 먼저 완료하세요");
-            step2Status.style.marginTop = 8;
-            step2Status.style.color = Color.gray;
+            step2Status = new Label("Complete Step 1 first");
+            step2Status.style.marginTop = 10;
+            step2Status.style.color = TextMuted;
+            step2Status.style.fontSize = 11;
             step2Status.style.unityTextAlign = TextAnchor.MiddleCenter;
             parent.Add(step2Status);
         }
+
+        // ─── Step 2: List Tab ───
 
         private void CreateStep2ListUI(VisualElement parent)
         {
             var headerRow = new VisualElement();
             headerRow.style.flexDirection = FlexDirection.Row;
             headerRow.style.alignItems = Align.Center;
-            headerRow.style.marginBottom = 8;
+            headerRow.style.marginBottom = 10;
 
-            var header = new Label("기능 목록");
+            var header = new Label("Registered Features");
             header.style.unityFontStyleAndWeight = FontStyle.Bold;
+            header.style.color = TextPrimary;
+            header.style.fontSize = 13;
             header.style.flexGrow = 1;
             headerRow.Add(header);
 
-            var refreshBtn = new Button(RefreshFeatureList);
-            refreshBtn.text = "새로고침";
-            refreshBtn.style.height = 24;
-            refreshBtn.style.width = 78;
+            var refreshBtn = CreateGhostButton("Refresh", RefreshFeatureList);
             headerRow.Add(refreshBtn);
 
             parent.Add(headerRow);
@@ -348,41 +639,28 @@ namespace TelleR
             featureListContainer.style.flexDirection = FlexDirection.Row;
             featureListContainer.style.flexWrap = Wrap.Wrap;
             featureListContainer.style.alignItems = Align.FlexStart;
-            featureListContainer.style.backgroundColor = new Color(0.12f, 0.12f, 0.12f);
-            featureListContainer.style.borderTopLeftRadius = 10;
-            featureListContainer.style.borderTopRightRadius = 10;
-            featureListContainer.style.borderBottomLeftRadius = 10;
-            featureListContainer.style.borderBottomRightRadius = 10;
-            featureListContainer.style.paddingTop = 10;
-            featureListContainer.style.paddingBottom = 10;
-            featureListContainer.style.paddingLeft = 10;
-            featureListContainer.style.paddingRight = 10;
             parent.Add(featureListContainer);
         }
 
-
+        // ─── Step 2: Organize Tab ───
 
         private void CreateOrganizerUI(VisualElement parent)
         {
             organizerContainer = new VisualElement();
-            organizerContainer.style.marginTop = 14;
-            organizerContainer.style.paddingTop = 10;
-            organizerContainer.style.borderTopWidth = 1;
-            organizerContainer.style.borderTopColor = new Color(0.3f, 0.3f, 0.3f);
 
             var headerRow = new VisualElement();
             headerRow.style.flexDirection = FlexDirection.Row;
             headerRow.style.alignItems = Align.Center;
+            headerRow.style.marginBottom = 10;
 
-            var header = new Label("정리 모드");
+            var header = new Label("File Organizer");
             header.style.unityFontStyleAndWeight = FontStyle.Bold;
+            header.style.color = TextPrimary;
+            header.style.fontSize = 13;
             header.style.flexGrow = 1;
             headerRow.Add(header);
 
-            var reloadBtn = new Button(RefreshOrganizer);
-            reloadBtn.text = "새로고침";
-            reloadBtn.style.height = 22;
-            reloadBtn.style.width = 72;
+            var reloadBtn = CreateGhostButton("Refresh", RefreshOrganizer);
             headerRow.Add(reloadBtn);
 
             organizerContainer.Add(headerRow);
@@ -390,10 +668,12 @@ namespace TelleR
             var popupRow = new VisualElement();
             popupRow.style.flexDirection = FlexDirection.Row;
             popupRow.style.alignItems = Align.Center;
-            popupRow.style.marginTop = 8;
+            popupRow.style.marginBottom = 10;
 
-            var popupLabel = new Label("기능:");
-            popupLabel.style.width = 40;
+            var popupLabel = new Label("Feature");
+            popupLabel.style.width = 60;
+            popupLabel.style.color = TextSecondary;
+            popupLabel.style.fontSize = 13;
             popupRow.Add(popupLabel);
 
             organizerFeaturePopup = new PopupField<string>(new List<string> { "-" }, 0);
@@ -404,17 +684,12 @@ namespace TelleR
             organizerContainer.Add(popupRow);
 
             organizerScroll = new ScrollView();
-            organizerScroll.style.marginTop = 10;
-            organizerScroll.style.height = 220;
-            organizerScroll.style.backgroundColor = new Color(0.12f, 0.12f, 0.12f);
-            organizerScroll.style.borderTopLeftRadius = 6;
-            organizerScroll.style.borderTopRightRadius = 6;
-            organizerScroll.style.borderBottomLeftRadius = 6;
-            organizerScroll.style.borderBottomRightRadius = 6;
-            organizerScroll.style.paddingTop = 8;
-            organizerScroll.style.paddingBottom = 8;
-            organizerScroll.style.paddingLeft = 10;
-            organizerScroll.style.paddingRight = 10;
+            organizerScroll.style.minHeight = 180;
+            organizerScroll.style.maxHeight = 300;
+            organizerScroll.style.backgroundColor = new Color(0.10f, 0.105f, 0.13f);
+            SetRadius(organizerScroll.style, RadiusSm);
+            SetBorder(organizerScroll.style, 1, Border);
+            SetPadding(organizerScroll.style, 10, 12);
 
             organizerContainer.Add(organizerScroll);
             parent.Add(organizerContainer);
@@ -422,6 +697,74 @@ namespace TelleR
             RefreshOrganizerFeatureOptions();
             RefreshOrganizer();
         }
+
+        // ─── Step 3 ───
+
+        private void CreateStep3(VisualElement root)
+        {
+            step3Container = CreateCard(root, "3", "Version & Deploy");
+
+            var versionRow = new VisualElement();
+            versionRow.style.flexDirection = FlexDirection.Row;
+            versionRow.style.alignItems = Align.Center;
+            versionRow.style.marginBottom = 12;
+
+            var versionLabel = new Label("Version");
+            versionLabel.style.width = 60;
+            versionLabel.style.color = TextSecondary;
+            versionLabel.style.fontSize = 13;
+            versionRow.Add(versionLabel);
+
+            versionField = new TextField();
+            versionField.value = "1.0.0";
+            versionField.style.width = 90;
+            versionField.style.marginRight = 12;
+            versionField.style.height = 30;
+            versionField.style.minHeight = 30;
+            versionRow.Add(versionField);
+
+            var patchBtn = CreateSmallButton("+0.0.1", () => BumpVersion("patch"), AccentGreen);
+            patchBtn.style.height = 28;
+            versionRow.Add(patchBtn);
+
+            var minorBtn = CreateSmallButton("+0.1.0", () => BumpVersion("minor"), AccentAmber);
+            minorBtn.style.height = 28;
+            versionRow.Add(minorBtn);
+
+            var majorBtn = CreateSmallButton("+1.0.0", () => BumpVersion("major"), AccentRed);
+            majorBtn.style.height = 28;
+            versionRow.Add(majorBtn);
+
+            step3Container.Add(versionRow);
+
+            var saveBtn = CreatePrimaryButton("Save package.json", SavePackageJson);
+            step3Container.Add(saveBtn);
+
+            step3Container.Add(CreateDivider());
+
+            var devModeLabel = new Label("Package Mode");
+            devModeLabel.style.unityFontStyleAndWeight = FontStyle.Bold;
+            devModeLabel.style.color = TextPrimary;
+            devModeLabel.style.fontSize = 13;
+            devModeLabel.style.marginBottom = 8;
+            step3Container.Add(devModeLabel);
+
+            devModeStatus = new Label("");
+            devModeStatus.style.fontSize = 12;
+            devModeStatus.style.color = TextPrimary;
+            devModeStatus.style.backgroundColor = BgInput;
+            SetRadius(devModeStatus.style, RadiusSm);
+            SetPadding(devModeStatus.style, 10, 14);
+            SetBorder(devModeStatus.style, 1, Border);
+            devModeStatus.style.marginBottom = 10;
+            devModeStatus.style.whiteSpace = WhiteSpace.Normal;
+            step3Container.Add(devModeStatus);
+
+            devModeButton = CreateSecondaryButton("Switch Mode", ToggleDevMode);
+            step3Container.Add(devModeButton);
+        }
+
+        // ─── Drag & Drop ───
 
         private void ClearPending()
         {
@@ -431,11 +774,8 @@ namespace TelleR
 
         private void OnDragEnter(DragEnterEvent evt)
         {
-            dropZone.style.borderTopColor = new Color(0.3f, 0.7f, 1f);
-            dropZone.style.borderBottomColor = new Color(0.3f, 0.7f, 1f);
-            dropZone.style.borderLeftColor = new Color(0.3f, 0.7f, 1f);
-            dropZone.style.borderRightColor = new Color(0.3f, 0.7f, 1f);
-            dropZone.style.backgroundColor = new Color(0.2f, 0.25f, 0.3f);
+            SetBorder(dropZone.style, 2, AccentBlue);
+            dropZone.style.backgroundColor = new Color(AccentBlue.r, AccentBlue.g, AccentBlue.b, 0.08f);
         }
 
         private void OnDragLeave(DragLeaveEvent evt)
@@ -454,21 +794,21 @@ namespace TelleR
 
             if (string.IsNullOrEmpty(currentPackagePath))
             {
-                EditorUtility.DisplayDialog("Error", "먼저 STEP 1을 완료하세요.", "OK");
+                EditorUtility.DisplayDialog("Error", "Complete Step 1 first.", "OK");
                 return;
             }
 
             string featureName = NormalizeFeatureName(newFeatureNameField.value);
             if (string.IsNullOrEmpty(featureName))
             {
-                EditorUtility.DisplayDialog("Error", "기능 이름을 먼저 입력하세요.\n(예: AudioVolume3D)", "OK");
+                EditorUtility.DisplayDialog("Error", "Enter a feature name first.\n(e.g. AudioVolume3D)", "OK");
                 return;
             }
 
             var objects = DragAndDrop.objectReferences?.ToList() ?? new List<UnityEngine.Object>();
             if (objects.Count == 0)
             {
-                EditorUtility.DisplayDialog("Error", "드래그된 항목이 없습니다.", "OK");
+                EditorUtility.DisplayDialog("Error", "No items detected.", "OK");
                 return;
             }
 
@@ -501,6 +841,23 @@ namespace TelleR
                     continue;
                 }
 
+                if (IsShaderAsset(assetPath))
+                {
+                    if (pendingItems.Any(p => p.SourceFullPath == fullPath)) continue;
+
+                    pendingItems.Add(new PendingItem
+                    {
+                        SourceFullPath = fullPath,
+                        Kind = PendingKind.Shader,
+                        Placement = PendingPlacement.Runtime,
+                        UseResources = false,
+                        DetectedEditor = false
+                    });
+
+                    added++;
+                    continue;
+                }
+
                 if (IsImageAsset(assetPath))
                 {
                     if (pendingItems.Any(p => p.SourceFullPath == fullPath)) continue;
@@ -517,16 +874,41 @@ namespace TelleR
                     added++;
                     continue;
                 }
+
+                if (IsResourceAsset(assetPath))
+                {
+                    if (pendingItems.Any(p => p.SourceFullPath == fullPath)) continue;
+
+                    pendingItems.Add(new PendingItem
+                    {
+                        SourceFullPath = fullPath,
+                        Kind = PendingKind.Resource,
+                        Placement = PendingPlacement.Runtime,
+                        UseResources = true,
+                        DetectedEditor = false
+                    });
+
+                    added++;
+                    continue;
+                }
             }
 
             if (added == 0)
             {
-                EditorUtility.DisplayDialog("Error", ".cs 또는 이미지 파일만 추가할 수 있어요.", "OK");
+                EditorUtility.DisplayDialog("Error", "Unsupported file type.\n\nSupported: .cs / Image / Material / ScriptableObject / Shader", "OK");
                 return;
             }
 
             RefreshPendingList();
         }
+
+        private void ResetDropZoneStyle()
+        {
+            SetBorder(dropZone.style, 2, Border);
+            dropZone.style.backgroundColor = new Color(0.10f, 0.105f, 0.13f);
+        }
+
+        // ─── Pending List UI ───
 
         private void RefreshPendingList()
         {
@@ -542,9 +924,11 @@ namespace TelleR
             pendingListContainer.style.display = DisplayStyle.Flex;
             confirmButton.style.display = DisplayStyle.Flex;
 
-            var header = new Label($"대기 중: {pendingItems.Count}개 (분류를 확인 후 확정)");
+            var header = new Label($"Queue: {pendingItems.Count} item{(pendingItems.Count > 1 ? "s" : "")}");
             header.style.marginBottom = 8;
-            header.style.color = new Color(0.7f, 0.9f, 0.7f);
+            header.style.color = AccentGreen;
+            header.style.fontSize = 12;
+            header.style.unityFontStyleAndWeight = FontStyle.Bold;
             pendingListContainer.Add(header);
 
             foreach (var item in pendingItems.ToList())
@@ -552,89 +936,83 @@ namespace TelleR
                 string fileName = Path.GetFileName(item.SourceFullPath);
 
                 var row = new VisualElement();
-                row.style.width = new Length(48, LengthUnit.Percent);
-                row.style.marginRight = 10;
-                row.style.marginBottom = 10;
-                row.style.paddingTop = 8;
-                row.style.paddingBottom = 8;
-                row.style.paddingLeft = 10;
-                row.style.paddingRight = 10;
-                row.style.backgroundColor = new Color(0.18f, 0.18f, 0.18f);
-                row.style.borderTopLeftRadius = 10;
-                row.style.borderTopRightRadius = 10;
-                row.style.borderBottomLeftRadius = 10;
-                row.style.borderBottomRightRadius = 10;
                 row.style.flexDirection = FlexDirection.Row;
                 row.style.alignItems = Align.Center;
-                row.style.marginBottom = 6;
+                row.style.marginBottom = 4;
+                row.style.backgroundColor = new Color(0.10f, 0.105f, 0.13f);
+                SetRadius(row.style, RadiusSm);
+                SetBorder(row.style, 1, Border);
+                SetPadding(row.style, 6, 10);
 
-                var kindLabel = new Label(item.Kind == PendingKind.Script ? "CS" : "IMG");
-                kindLabel.style.width = 34;
-                kindLabel.style.unityTextAlign = TextAnchor.MiddleCenter;
-                kindLabel.style.color = item.Kind == PendingKind.Script ? new Color(0.75f, 0.85f, 1f) : new Color(1f, 0.85f, 0.6f);
-                row.Add(kindLabel);
+                string kindText;
+                Color kindColor;
+                switch (item.Kind)
+                {
+                    case PendingKind.Script:   kindText = "CS";  kindColor = AccentBlue; break;
+                    case PendingKind.Image:    kindText = "IMG"; kindColor = AccentAmber; break;
+                    case PendingKind.Resource: kindText = "RES"; kindColor = AccentCyan; break;
+                    case PendingKind.Shader:   kindText = "SHD"; kindColor = AccentPurple; break;
+                    default:                   kindText = "?";   kindColor = TextMuted; break;
+                }
+
+                row.Add(CreatePill(kindText, kindColor));
 
                 var nameLabel = new Label(fileName);
                 nameLabel.style.flexGrow = 1;
-                nameLabel.style.marginRight = 8;
+                nameLabel.style.color = TextPrimary;
+                nameLabel.style.fontSize = 12;
+                nameLabel.style.overflow = Overflow.Hidden;
+                nameLabel.style.textOverflow = TextOverflow.Ellipsis;
                 row.Add(nameLabel);
 
-                var placementChoices = item.Kind == PendingKind.Script
-                    ? new List<string> { "Auto", "Editor", "Runtime" }
-                    : new List<string> { "Editor", "Runtime" };
+                List<string> placementChoices;
+                if (item.Kind == PendingKind.Script)
+                    placementChoices = new List<string> { "Auto", "Editor", "Runtime" };
+                else
+                    placementChoices = new List<string> { "Editor", "Runtime" };
 
                 int defaultIndex = 0;
                 if (item.Kind == PendingKind.Script)
-                {
                     defaultIndex = item.Placement == PendingPlacement.Auto ? 0 : (item.Placement == PendingPlacement.Editor ? 1 : 2);
-                }
                 else
-                {
                     defaultIndex = item.Placement == PendingPlacement.Editor ? 0 : 1;
-                }
 
                 var placementPopup = new PopupField<string>(placementChoices, Mathf.Clamp(defaultIndex, 0, placementChoices.Count - 1));
-                placementPopup.style.width = 92;
-                placementPopup.style.marginRight = 6;
+                placementPopup.style.width = 80;
+                placementPopup.style.marginLeft = 6;
+                placementPopup.style.marginRight = 4;
                 placementPopup.RegisterValueChangedCallback(e =>
                 {
                     if (item.Kind == PendingKind.Script)
-                    {
                         item.Placement = e.newValue == "Auto" ? PendingPlacement.Auto : (e.newValue == "Editor" ? PendingPlacement.Editor : PendingPlacement.Runtime);
-                    }
                     else
-                    {
                         item.Placement = e.newValue == "Editor" ? PendingPlacement.Editor : PendingPlacement.Runtime;
-                    }
                 });
                 row.Add(placementPopup);
 
-                if (item.Kind == PendingKind.Image)
+                if (item.Kind == PendingKind.Script)
                 {
-                    var resourcesToggle = new Toggle("Res");
-                    resourcesToggle.value = item.UseResources;
-                    resourcesToggle.style.width = 56;
-                    resourcesToggle.style.marginRight = 6;
-                    resourcesToggle.RegisterValueChangedCallback(e => item.UseResources = e.newValue);
-                    row.Add(resourcesToggle);
+                    var hint = new Label(item.DetectedEditor ? "E" : "R");
+                    hint.style.width = 18;
+                    hint.style.color = item.DetectedEditor ? AccentBlue : AccentGreen;
+                    hint.style.unityTextAlign = TextAnchor.MiddleCenter;
+                    hint.style.fontSize = 10;
+                    hint.style.unityFontStyleAndWeight = FontStyle.Bold;
+                    hint.style.marginRight = 4;
+                    row.Add(hint);
                 }
                 else
                 {
-                    var hint = new Label(item.DetectedEditor ? "Auto=E" : "Auto=R");
-                    hint.style.width = 56;
-                    hint.style.color = Color.gray;
-                    hint.style.unityTextAlign = TextAnchor.MiddleCenter;
-                    hint.style.marginRight = 6;
-                    row.Add(hint);
+                    var resourcesToggle = new Toggle("Res");
+                    resourcesToggle.value = item.UseResources;
+                    resourcesToggle.style.width = 46;
+                    resourcesToggle.style.marginRight = 4;
+                    resourcesToggle.RegisterValueChangedCallback(e => item.UseResources = e.newValue);
+                    row.Add(resourcesToggle);
                 }
 
                 string capturedPath = item.SourceFullPath;
-                var removeBtn = new Button(() => RemovePendingItem(capturedPath));
-                removeBtn.text = "✕";
-                removeBtn.style.width = 22;
-                removeBtn.style.height = 18;
-                removeBtn.style.backgroundColor = new Color(0.4f, 0.2f, 0.2f);
-                row.Add(removeBtn);
+                row.Add(CreateDangerButton("x", () => RemovePendingItem(capturedPath), 20));
 
                 pendingListContainer.Add(row);
             }
@@ -654,12 +1032,398 @@ namespace TelleR
             string featureName = NormalizeFeatureName(newFeatureNameField.value);
             if (string.IsNullOrEmpty(featureName))
             {
-                EditorUtility.DisplayDialog("Error", "기능 이름을 먼저 입력하세요.", "OK");
+                EditorUtility.DisplayDialog("Error", "Enter a feature name first.", "OK");
                 return;
             }
 
             ProcessPendingItems(featureName);
         }
+
+        // ─── Feature List UI ───
+
+        private void RefreshFeatureList()
+        {
+            featureListContainer.Clear();
+
+            if (string.IsNullOrEmpty(currentPackagePath)) return;
+
+            string editorPath = Path.Combine(currentPackagePath, "Editor");
+            string runtimePath = Path.Combine(currentPackagePath, "Runtime");
+            string editorResPath = Path.Combine(editorPath, "Resources");
+            string runtimeResPath = Path.Combine(runtimePath, "Resources");
+
+            var features = new Dictionary<string, (bool hasEditor, bool hasRuntime, bool hasEditorRes, bool hasRuntimeRes, int editorFiles, int runtimeFiles, int editorResFiles, int runtimeResFiles)>();
+
+            if (Directory.Exists(editorPath))
+            {
+                foreach (string dir in Directory.GetDirectories(editorPath))
+                {
+                    string name = Path.GetFileName(dir);
+                    if (name == "Resources") continue;
+                    int files = CountNonMetaFiles(dir);
+                    features[name] = (true, false, false, false, files, 0, 0, 0);
+                }
+            }
+
+            if (Directory.Exists(runtimePath))
+            {
+                foreach (string dir in Directory.GetDirectories(runtimePath))
+                {
+                    string name = Path.GetFileName(dir);
+                    if (name == "Resources") continue;
+                    int files = CountNonMetaFiles(dir);
+                    if (features.ContainsKey(name))
+                    {
+                        var e = features[name];
+                        features[name] = (e.hasEditor, true, e.hasEditorRes, e.hasRuntimeRes, e.editorFiles, files, e.editorResFiles, e.runtimeResFiles);
+                    }
+                    else
+                        features[name] = (false, true, false, false, 0, files, 0, 0);
+                }
+            }
+
+            if (Directory.Exists(editorResPath))
+            {
+                foreach (string dir in Directory.GetDirectories(editorResPath))
+                {
+                    string name = Path.GetFileName(dir);
+                    int files = CountNonMetaFiles(dir);
+                    if (features.ContainsKey(name))
+                    {
+                        var e = features[name];
+                        features[name] = (e.hasEditor, e.hasRuntime, true, e.hasRuntimeRes, e.editorFiles, e.runtimeFiles, files, e.runtimeResFiles);
+                    }
+                    else
+                        features[name] = (false, false, true, false, 0, 0, files, 0);
+                }
+            }
+
+            if (Directory.Exists(runtimeResPath))
+            {
+                foreach (string dir in Directory.GetDirectories(runtimeResPath))
+                {
+                    string name = Path.GetFileName(dir);
+                    int files = CountNonMetaFiles(dir);
+                    if (features.ContainsKey(name))
+                    {
+                        var e = features[name];
+                        features[name] = (e.hasEditor, e.hasRuntime, e.hasEditorRes, true, e.editorFiles, e.runtimeFiles, e.editorResFiles, files);
+                    }
+                    else
+                        features[name] = (false, false, false, true, 0, 0, 0, files);
+                }
+            }
+
+            if (features.Count == 0)
+            {
+                var empty = new Label("No features yet. Add files via the Add tab.");
+                empty.style.color = TextMuted;
+                empty.style.unityTextAlign = TextAnchor.MiddleCenter;
+                empty.style.fontSize = 11;
+                empty.style.marginTop = 16;
+                empty.style.marginBottom = 16;
+                empty.style.flexGrow = 1;
+                featureListContainer.Add(empty);
+                return;
+            }
+
+            foreach (var kvp in features.OrderBy(k => k.Key))
+            {
+                string featureName = kvp.Key;
+                var info = kvp.Value;
+
+                var card = new VisualElement();
+                card.style.width = new Length(100, LengthUnit.Percent);
+                card.style.flexDirection = FlexDirection.Column;
+                card.style.marginBottom = 6;
+                card.style.backgroundColor = new Color(0.10f, 0.105f, 0.13f);
+                SetRadius(card.style, RadiusSm);
+                SetBorder(card.style, 1, Border);
+                SetPadding(card.style, 10, 12);
+
+                var topRow = new VisualElement();
+                topRow.style.flexDirection = FlexDirection.Row;
+                topRow.style.alignItems = Align.Center;
+
+                var label = new Label(featureName);
+                label.style.flexGrow = 1;
+                label.style.unityFontStyleAndWeight = FontStyle.Bold;
+                label.style.color = TextPrimary;
+                label.style.fontSize = 13;
+                topRow.Add(label);
+
+                var focusBtn = CreateSmallButton("Organize", () => {
+                    FocusOrganizerFeature(featureName);
+                    SelectStep2Tab(Step2Tab.Organize);
+                }, AccentBlue);
+                topRow.Add(focusBtn);
+
+                var deleteBtn = CreateDangerButton("x", () => DeleteFeature(featureName), 22);
+                deleteBtn.style.marginLeft = 4;
+                topRow.Add(deleteBtn);
+
+                card.Add(topRow);
+
+                var badgeRow = new VisualElement();
+                badgeRow.style.flexDirection = FlexDirection.Row;
+                badgeRow.style.flexWrap = Wrap.Wrap;
+                badgeRow.style.marginTop = 6;
+
+                if (info.hasEditor) badgeRow.Add(CreatePill($"E:{info.editorFiles}", AccentBlue));
+                if (info.hasRuntime) badgeRow.Add(CreatePill($"R:{info.runtimeFiles}", AccentGreen));
+                if (info.hasEditorRes) badgeRow.Add(CreatePill($"E/Res:{info.editorResFiles}", AccentPurple));
+                if (info.hasRuntimeRes) badgeRow.Add(CreatePill($"R/Res:{info.runtimeResFiles}", AccentAmber));
+
+                card.Add(badgeRow);
+                featureListContainer.Add(card);
+            }
+        }
+
+        // ─── Organizer UI ───
+
+        private void RefreshOrganizerFeatureOptions()
+        {
+            if (organizerFeaturePopup == null) return;
+
+            var features = GetAllFeatureNames();
+            if (features.Count == 0) features.Add("-");
+
+            string current = organizerFeaturePopup.value;
+            organizerFeaturePopup.choices = features;
+
+            int newIndex = features.IndexOf(current);
+            if (newIndex < 0) newIndex = 0;
+
+            organizerFeaturePopup.SetValueWithoutNotify(features[newIndex]);
+        }
+
+        private void RefreshOrganizer()
+        {
+            if (organizerScroll == null) return;
+
+            organizerScroll.Clear();
+
+            if (string.IsNullOrEmpty(currentPackagePath) || !Directory.Exists(currentPackagePath))
+            {
+                AddOrganizerEmpty("Complete Step 1 first.");
+                return;
+            }
+
+            var features = GetAllFeatureNames();
+            if (features.Count == 0)
+            {
+                AddOrganizerEmpty("No features. Add files first.");
+                return;
+            }
+
+            string feature = organizerFeaturePopup != null ? organizerFeaturePopup.value : "-";
+            if (string.IsNullOrEmpty(feature) || feature == "-")
+            {
+                AddOrganizerEmpty("Select a feature to organize.");
+                return;
+            }
+
+            var entries = ScanFeatureEntries(feature);
+            if (entries.Count == 0)
+            {
+                AddOrganizerEmpty("No files in this feature.");
+                return;
+            }
+
+            foreach (var entry in entries)
+            {
+                organizerScroll.Add(CreateOrganizerRow(feature, entry));
+            }
+        }
+
+        private void AddOrganizerEmpty(string text)
+        {
+            var label = new Label(text);
+            label.style.color = TextMuted;
+            label.style.unityTextAlign = TextAnchor.MiddleCenter;
+            label.style.fontSize = 12;
+            label.style.marginTop = 20;
+            label.style.marginBottom = 20;
+            organizerScroll.Add(label);
+        }
+
+        private VisualElement CreateOrganizerRow(string featureName, FeatureEntry entry)
+        {
+            var row = new VisualElement();
+            row.style.flexDirection = FlexDirection.Row;
+            row.style.alignItems = Align.Center;
+            row.style.marginBottom = 4;
+            row.style.backgroundColor = new Color(BgCard.r, BgCard.g, BgCard.b, 0.5f);
+            SetRadius(row.style, RadiusXs);
+            SetPadding(row.style, 5, 8);
+
+            row.Add(CreatePill(entry.Tag, entry.TagColor));
+
+            var nameLabel = new Label(entry.FileName);
+            nameLabel.style.flexGrow = 1;
+            nameLabel.style.color = TextPrimary;
+            nameLabel.style.fontSize = 12;
+            nameLabel.style.overflow = Overflow.Hidden;
+            nameLabel.style.textOverflow = TextOverflow.Ellipsis;
+            nameLabel.style.marginRight = 6;
+            row.Add(nameLabel);
+
+            bool isScript = entry.FileName.EndsWith(".cs", StringComparison.OrdinalIgnoreCase);
+
+            if (isScript)
+            {
+                row.Add(CreateSmallButton("Editor", () => MoveEntry(featureName, entry, FeatureLocation.EditorFeature), AccentBlue));
+                row.Add(CreateSmallButton("Runtime", () => MoveEntry(featureName, entry, FeatureLocation.RuntimeFeature), AccentGreen));
+            }
+            else
+            {
+                row.Add(CreateSmallButton("E", () => MoveEntry(featureName, entry, FeatureLocation.EditorFeature), AccentBlue));
+                row.Add(CreateSmallButton("R", () => MoveEntry(featureName, entry, FeatureLocation.RuntimeFeature), AccentGreen));
+                row.Add(CreateSmallButton("E/Res", () => MoveEntry(featureName, entry, FeatureLocation.EditorResources), AccentPurple));
+                row.Add(CreateSmallButton("R/Res", () => MoveEntry(featureName, entry, FeatureLocation.RuntimeResources), AccentAmber));
+            }
+
+            row.Add(CreateDangerButton("x", () => DeleteEntry(entry), 20));
+
+            return row;
+        }
+
+        // ─── State Management ───
+
+        private void UpdateStepStates()
+        {
+            bool hasPackage = !string.IsNullOrEmpty(currentPackagePath) && Directory.Exists(currentPackagePath);
+
+            step2Container.SetEnabled(hasPackage);
+            step3Container.SetEnabled(hasPackage);
+
+            if (hasPackage)
+            {
+                step2Status.text = "";
+                step2Status.style.display = DisplayStyle.None;
+            }
+            else
+            {
+                step2Status.text = "Complete Step 1 first";
+                step2Status.style.display = DisplayStyle.Flex;
+            }
+        }
+
+        private void TryLoadLastPackage()
+        {
+            string lastPath = EditorPrefs.GetString(PREF_LAST_PATH, "");
+            if (!string.IsNullOrEmpty(lastPath) && Directory.Exists(lastPath))
+            {
+                LoadPackageFromPath(lastPath);
+            }
+        }
+
+        // ─── Package Operations ───
+
+        private void LoadExistingPackage()
+        {
+            string folderPath = EditorUtility.OpenFolderPanel("Select Package Folder", "", "");
+            if (string.IsNullOrEmpty(folderPath)) return;
+
+            string packageJsonPath = Path.Combine(folderPath, "package.json");
+            if (!File.Exists(packageJsonPath))
+            {
+                EditorUtility.DisplayDialog("Error", "package.json not found in this folder.", "OK");
+                return;
+            }
+
+            LoadPackageFromPath(folderPath);
+        }
+
+        private void LoadPackageFromPath(string folderPath)
+        {
+            string packageJsonPath = Path.Combine(folderPath, "package.json");
+            if (!File.Exists(packageJsonPath)) return;
+
+            try
+            {
+                string json = File.ReadAllText(packageJsonPath);
+                var packageInfo = JsonUtility.FromJson<PackageJson>(json);
+
+                packageNameField.value = packageInfo.name ?? "com.teller.util";
+                displayNameField.value = packageInfo.displayName ?? "TelleR Utilities";
+                versionField.value = packageInfo.version ?? "1.0.0";
+                descriptionField.value = packageInfo.description ?? "";
+                unityVersionField.value = packageInfo.unity ?? "2021.3";
+                if (packageInfo.author != null)
+                    authorField.value = packageInfo.author.name ?? "TelleR";
+
+                currentPackagePath = folderPath;
+                EditorPrefs.SetString(PREF_LAST_PATH, folderPath);
+
+                step1Status.text = $"Loaded: {Path.GetFileName(folderPath)}";
+                step1Status.style.color = AccentGreen;
+                UpdateStep1Summary(Path.GetFileName(folderPath));
+
+                UpdateStepStates();
+                RefreshFeatureList();
+                UpdateDevModeUI();
+                EnsureMetaFiles(folderPath);
+                RefreshOrganizerFeatureOptions();
+                RefreshOrganizer();
+            }
+            catch (Exception e)
+            {
+                EditorUtility.DisplayDialog("Error", $"Load failed:\n{e.Message}", "OK");
+            }
+        }
+
+        private void CreateNewPackage()
+        {
+            string folderPath = EditorUtility.SaveFolderPanel("Select folder for new package", "", "");
+            if (string.IsNullOrEmpty(folderPath)) return;
+
+            string packageName = packageNameField.value;
+            string packageRoot = Path.Combine(folderPath, packageName);
+
+            if (Directory.Exists(packageRoot))
+            {
+                if (EditorUtility.DisplayDialog("Folder Exists", $"'{packageName}' already exists. Load it?", "Load", "Cancel"))
+                {
+                    LoadPackageFromPath(packageRoot);
+                }
+                return;
+            }
+
+            Directory.CreateDirectory(packageRoot);
+
+            currentPackagePath = packageRoot;
+            SavePackageJson();
+            CreateReadme(packageRoot);
+            CreateLicense(packageRoot);
+            CreateGitIgnore(packageRoot);
+
+            EditorPrefs.SetString(PREF_LAST_PATH, packageRoot);
+
+            step1Status.text = $"Created: {packageName}";
+            step1Status.style.color = AccentGreen;
+            UpdateStep1Summary(packageName);
+
+            UpdateStepStates();
+            RefreshFeatureList();
+            RefreshOrganizerFeatureOptions();
+            RefreshOrganizer();
+
+            EditorUtility.DisplayDialog("Done", "Package created!\n\nAdd features in Step 2.", "OK");
+        }
+
+        private void OpenPackageFolder()
+        {
+            if (string.IsNullOrEmpty(currentPackagePath))
+            {
+                EditorUtility.DisplayDialog("Error", "Complete Step 1 first.", "OK");
+                return;
+            }
+
+            EditorUtility.RevealInFinder(currentPackagePath);
+        }
+
+        // ─── Process Pending Items ───
 
         private void ProcessPendingItems(string featureName)
         {
@@ -681,6 +1445,12 @@ namespace TelleR
             var addedImagesRuntime = new List<string>();
             var addedImagesEditorRes = new List<string>();
             var addedImagesRuntimeRes = new List<string>();
+            var addedResourcesEditor = new List<string>();
+            var addedResourcesRuntime = new List<string>();
+            var addedResourcesEditorRes = new List<string>();
+            var addedResourcesRuntimeRes = new List<string>();
+            var addedShaders = new List<string>();
+            var addedShadersRes = new List<string>();
 
             foreach (var item in pendingItems)
             {
@@ -705,6 +1475,54 @@ namespace TelleR
 
                     if (isEditor) addedScriptsEditor.Add(fileName);
                     else addedScriptsRuntime.Add(fileName);
+                }
+                else if (item.Kind == PendingKind.Shader)
+                {
+                    bool toEditor = item.Placement == PendingPlacement.Editor;
+                    string root = toEditor ? editorRoot : runtimeRoot;
+
+                    string shadersDir = Path.Combine(root, featureName, "Shaders");
+                    string featureDir = Path.Combine(root, featureName);
+
+                    if (!Directory.Exists(featureDir))
+                    {
+                        Directory.CreateDirectory(featureDir);
+                        CreateFolderMeta(root, featureName);
+                    }
+
+                    string targetDir;
+                    if (item.UseResources)
+                    {
+                        string resRoot = Path.Combine(root, "Resources");
+                        if (!Directory.Exists(resRoot))
+                        {
+                            Directory.CreateDirectory(resRoot);
+                            CreateFolderMeta(root, "Resources");
+                        }
+
+                        targetDir = toEditor ? editorResourcesPath : runtimeResourcesPath;
+                        if (!Directory.Exists(targetDir))
+                        {
+                            Directory.CreateDirectory(targetDir);
+                            CreateFolderMeta(Path.Combine(root, "Resources"), featureName);
+                        }
+                    }
+                    else
+                    {
+                        if (!Directory.Exists(shadersDir))
+                        {
+                            Directory.CreateDirectory(shadersDir);
+                            CreateFolderMeta(featureDir, "Shaders");
+                        }
+                        targetDir = shadersDir;
+                    }
+
+                    string dest = Path.Combine(targetDir, fileName);
+                    File.Copy(item.SourceFullPath, dest, true);
+                    CreateMetaFromSourceOrDefault(item.SourceFullPath, dest, PendingKind.Shader);
+
+                    if (item.UseResources) addedShadersRes.Add(fileName);
+                    else addedShaders.Add(fileName);
                 }
                 else
                 {
@@ -744,17 +1562,33 @@ namespace TelleR
 
                     string dest = Path.Combine(targetDir, fileName);
                     File.Copy(item.SourceFullPath, dest, true);
-                    CreateMetaFromSourceOrDefault(item.SourceFullPath, dest, PendingKind.Image);
+                    CreateMetaFromSourceOrDefault(item.SourceFullPath, dest, item.Kind);
 
-                    if (toEditor)
+                    if (item.Kind == PendingKind.Image)
                     {
-                        if (item.UseResources) addedImagesEditorRes.Add(fileName);
-                        else addedImagesEditor.Add(fileName);
+                        if (toEditor)
+                        {
+                            if (item.UseResources) addedImagesEditorRes.Add(fileName);
+                            else addedImagesEditor.Add(fileName);
+                        }
+                        else
+                        {
+                            if (item.UseResources) addedImagesRuntimeRes.Add(fileName);
+                            else addedImagesRuntime.Add(fileName);
+                        }
                     }
                     else
                     {
-                        if (item.UseResources) addedImagesRuntimeRes.Add(fileName);
-                        else addedImagesRuntime.Add(fileName);
+                        if (toEditor)
+                        {
+                            if (item.UseResources) addedResourcesEditorRes.Add(fileName);
+                            else addedResourcesEditor.Add(fileName);
+                        }
+                        else
+                        {
+                            if (item.UseResources) addedResourcesRuntimeRes.Add(fileName);
+                            else addedResourcesRuntime.Add(fileName);
+                        }
                     }
                 }
             }
@@ -768,150 +1602,79 @@ namespace TelleR
 
             AssetDatabase.Refresh(ImportAssetOptions.ForceUpdate);
 
-            string message = $"'{featureName}' 추가 완료!\n\n";
-            if (addedScriptsEditor.Count > 0) message += $"✓ Editor Script: {addedScriptsEditor.Count}개 ({string.Join(", ", addedScriptsEditor)})\n";
-            if (addedScriptsRuntime.Count > 0) message += $"✓ Runtime Script: {addedScriptsRuntime.Count}개 ({string.Join(", ", addedScriptsRuntime)})\n";
-            if (addedImagesEditor.Count > 0) message += $"✓ Editor Image: {addedImagesEditor.Count}개 ({string.Join(", ", addedImagesEditor)})\n";
-            if (addedImagesRuntime.Count > 0) message += $"✓ Runtime Image: {addedImagesRuntime.Count}개 ({string.Join(", ", addedImagesRuntime)})\n";
-            if (addedImagesEditorRes.Count > 0) message += $"✓ Editor Resources: {addedImagesEditorRes.Count}개 ({string.Join(", ", addedImagesEditorRes)})\n";
-            if (addedImagesRuntimeRes.Count > 0) message += $"✓ Runtime Resources: {addedImagesRuntimeRes.Count}개 ({string.Join(", ", addedImagesRuntimeRes)})\n";
+            string message = $"'{featureName}' added!\n\n";
+            if (addedScriptsEditor.Count > 0) message += $"Editor Script: {addedScriptsEditor.Count} ({string.Join(", ", addedScriptsEditor)})\n";
+            if (addedScriptsRuntime.Count > 0) message += $"Runtime Script: {addedScriptsRuntime.Count} ({string.Join(", ", addedScriptsRuntime)})\n";
+            if (addedImagesEditor.Count > 0) message += $"Editor Image: {addedImagesEditor.Count} ({string.Join(", ", addedImagesEditor)})\n";
+            if (addedImagesRuntime.Count > 0) message += $"Runtime Image: {addedImagesRuntime.Count} ({string.Join(", ", addedImagesRuntime)})\n";
+            if (addedImagesEditorRes.Count > 0) message += $"Editor Res(Image): {addedImagesEditorRes.Count} ({string.Join(", ", addedImagesEditorRes)})\n";
+            if (addedImagesRuntimeRes.Count > 0) message += $"Runtime Res(Image): {addedImagesRuntimeRes.Count} ({string.Join(", ", addedImagesRuntimeRes)})\n";
+            if (addedResourcesEditor.Count > 0) message += $"Editor Asset: {addedResourcesEditor.Count} ({string.Join(", ", addedResourcesEditor)})\n";
+            if (addedResourcesRuntime.Count > 0) message += $"Runtime Asset: {addedResourcesRuntime.Count} ({string.Join(", ", addedResourcesRuntime)})\n";
+            if (addedResourcesEditorRes.Count > 0) message += $"Editor Res(Asset): {addedResourcesEditorRes.Count} ({string.Join(", ", addedResourcesEditorRes)})\n";
+            if (addedResourcesRuntimeRes.Count > 0) message += $"Runtime Res(Asset): {addedResourcesRuntimeRes.Count} ({string.Join(", ", addedResourcesRuntimeRes)})\n";
+            if (addedShaders.Count > 0) message += $"Shader: {addedShaders.Count} ({string.Join(", ", addedShaders)})\n";
+            if (addedShadersRes.Count > 0) message += $"Shader(Res): {addedShadersRes.Count} ({string.Join(", ", addedShadersRes)})\n";
 
-            EditorUtility.DisplayDialog("완료", message, "OK");
+            EditorUtility.DisplayDialog("Done", message, "OK");
         }
 
-        private void RefreshOrganizerFeatureOptions()
+        // ─── Feature Entry Operations ───
+
+        private void FocusOrganizerFeature(string featureName)
         {
             if (organizerFeaturePopup == null) return;
 
-            var features = GetAllFeatureNames();
-            if (features.Count == 0) features.Add("-");
+            RefreshOrganizerFeatureOptions();
 
-            string current = organizerFeaturePopup.value;
-            organizerFeaturePopup.choices = features;
+            int idx = organizerFeaturePopup.choices.IndexOf(featureName);
+            if (idx < 0) return;
 
-            int newIndex = features.IndexOf(current);
-            if (newIndex < 0) newIndex = 0;
-
-            organizerFeaturePopup.SetValueWithoutNotify(features[newIndex]);
+            organizerFeaturePopup.SetValueWithoutNotify(featureName);
+            RefreshOrganizer();
         }
 
-        private void RefreshOrganizer()
+        private void DeleteFeature(string featureName)
         {
-            if (organizerScroll == null)
-                return;
-
-            organizerScroll.Clear();
-
-            if (string.IsNullOrEmpty(currentPackagePath) || !Directory.Exists(currentPackagePath))
-            {
-                AddOrganizerEmpty("STEP 1을 먼저 완료하세요.");
-                return;
-            }
-
-            var features = GetAllFeatureNames();
-            if (features.Count == 0)
-            {
-                AddOrganizerEmpty("기능이 없습니다. STEP 2에서 먼저 추가하세요.");
-                return;
-            }
-
-            string feature = organizerFeaturePopup != null ? organizerFeaturePopup.value : "-";
-            if (string.IsNullOrEmpty(feature) || feature == "-")
-            {
-                AddOrganizerEmpty("정리할 기능을 선택하세요.");
-                return;
-            }
-
-            var entries = ScanFeatureEntries(feature);
-            if (entries.Count == 0)
-            {
-                AddOrganizerEmpty("이 기능 폴더에 파일이 없습니다.");
-                return;
-            }
-
-            foreach (var entry in entries)
-            {
-                organizerScroll.Add(CreateOrganizerRow(feature, entry));
-            }
-        }
-
-        private void AddOrganizerEmpty(string text)
-        {
-            var label = new Label(text);
-            label.style.color = Color.gray;
-            label.style.unityTextAlign = TextAnchor.MiddleCenter;
-            label.style.marginTop = 14;
-            label.style.marginBottom = 14;
-            organizerScroll.Add(label);
-        }
-
-        private VisualElement CreateOrganizerRow(string featureName, FeatureEntry entry)
-        {
-            var row = new VisualElement();
-            row.style.flexDirection = FlexDirection.Row;
-            row.style.alignItems = Align.Center;
-            row.style.marginBottom = 6;
-
-            var tag = new Label(entry.Tag);
-            tag.style.width = 56;
-            tag.style.unityTextAlign = TextAnchor.MiddleCenter;
-            tag.style.color = entry.TagColor;
-            row.Add(tag);
-
-            var nameLabel = new Label(entry.FileName);
-            nameLabel.style.flexGrow = 1;
-            nameLabel.style.marginRight = 8;
-            row.Add(nameLabel);
-
-            bool isScript = entry.FileName.EndsWith(".cs", StringComparison.OrdinalIgnoreCase);
-
-            if (isScript)
-            {
-                row.Add(CreateMoveButton("Editor", () => MoveEntry(featureName, entry, FeatureLocation.EditorFeature)));
-                row.Add(CreateMoveButton("Runtime", () => MoveEntry(featureName, entry, FeatureLocation.RuntimeFeature)));
-            }
-            else
-            {
-                row.Add(CreateMoveButton("E", () => MoveEntry(featureName, entry, FeatureLocation.EditorFeature)));
-                row.Add(CreateMoveButton("R", () => MoveEntry(featureName, entry, FeatureLocation.RuntimeFeature)));
-                row.Add(CreateMoveButton("E/Res", () => MoveEntry(featureName, entry, FeatureLocation.EditorResources)));
-                row.Add(CreateMoveButton("R/Res", () => MoveEntry(featureName, entry, FeatureLocation.RuntimeResources)));
-            }
-
-            var delBtn = new Button(() => DeleteEntry(entry));
-            delBtn.text = "✕";
-            delBtn.style.width = 22;
-            delBtn.style.height = 18;
-            delBtn.style.marginLeft = 6;
-            delBtn.style.backgroundColor = new Color(0.4f, 0.2f, 0.2f);
-            row.Add(delBtn);
-
-            return row;
-        }
-
-        private Button CreateMoveButton(string text, Action onClick)
-        {
-            var btn = new Button(onClick);
-            btn.text = text;
-            btn.style.width = text.Length >= 4 ? 56 : 40;
-            btn.style.height = 18;
-            btn.style.marginRight = 4;
-            return btn;
-        }
-
-        private void DeleteEntry(FeatureEntry entry)
-        {
-            if (!EditorUtility.DisplayDialog("삭제 확인", $"{entry.FileName} 삭제할까요?", "삭제", "취소"))
+            if (!EditorUtility.DisplayDialog("Delete Feature", $"Delete '{featureName}'?", "Delete", "Cancel"))
                 return;
 
             try
             {
-                if (File.Exists(entry.FullPath))
-                    File.Delete(entry.FullPath);
+                DeleteDirIfExists(Path.Combine(currentPackagePath, "Editor", featureName));
+                DeleteDirIfExists(Path.Combine(currentPackagePath, "Runtime", featureName));
+                DeleteDirIfExists(Path.Combine(currentPackagePath, "Editor", "Resources", featureName));
+                DeleteDirIfExists(Path.Combine(currentPackagePath, "Runtime", "Resources", featureName));
 
+                AssetDatabase.Refresh(ImportAssetOptions.ForceUpdate);
+                RefreshFeatureList();
+                RefreshOrganizerFeatureOptions();
+                RefreshOrganizer();
+            }
+            catch (Exception e)
+            {
+                EditorUtility.DisplayDialog("Error", $"Delete failed:\n{e.Message}", "OK");
+            }
+        }
+
+        private void DeleteDirIfExists(string dir)
+        {
+            if (!Directory.Exists(dir)) return;
+            Directory.Delete(dir, true);
+            string metaPath = dir + ".meta";
+            if (File.Exists(metaPath)) File.Delete(metaPath);
+        }
+
+        private void DeleteEntry(FeatureEntry entry)
+        {
+            if (!EditorUtility.DisplayDialog("Delete", $"Delete {entry.FileName}?", "Delete", "Cancel"))
+                return;
+
+            try
+            {
+                if (File.Exists(entry.FullPath)) File.Delete(entry.FullPath);
                 string meta = entry.FullPath + ".meta";
-                if (File.Exists(meta))
-                    File.Delete(meta);
+                if (File.Exists(meta)) File.Delete(meta);
 
                 AssetDatabase.Refresh(ImportAssetOptions.ForceUpdate);
                 RefreshFeatureList();
@@ -919,25 +1682,8 @@ namespace TelleR
             }
             catch (Exception e)
             {
-                EditorUtility.DisplayDialog("Error", $"삭제 실패:\n{e.Message}", "OK");
+                EditorUtility.DisplayDialog("Error", $"Delete failed:\n{e.Message}", "OK");
             }
-        }
-
-        private enum FeatureLocation
-        {
-            EditorFeature,
-            RuntimeFeature,
-            EditorResources,
-            RuntimeResources
-        }
-
-        private class FeatureEntry
-        {
-            public string FileName;
-            public string FullPath;
-            public FeatureLocation Location;
-            public string Tag;
-            public Color TagColor;
         }
 
         private void MoveEntry(string featureName, FeatureEntry entry, FeatureLocation target)
@@ -953,41 +1699,26 @@ namespace TelleR
                 if (!Directory.Exists(destDir))
                 {
                     Directory.CreateDirectory(destDir);
-
-                    string parent = Directory.GetParent(destDir)?.FullName;
+                    string parentDir = Directory.GetParent(destDir)?.FullName;
                     string folderName = Path.GetFileName(destDir);
-
-                    if (!string.IsNullOrEmpty(parent))
-                        CreateFolderMeta(parent, folderName);
+                    if (!string.IsNullOrEmpty(parentDir))
+                        CreateFolderMeta(parentDir, folderName);
                 }
 
                 string destPath = Path.Combine(destDir, entry.FileName);
 
-                if (File.Exists(destPath))
-                    File.Delete(destPath);
-
+                if (File.Exists(destPath)) File.Delete(destPath);
                 File.Move(entry.FullPath, destPath);
 
                 string srcMeta = entry.FullPath + ".meta";
                 string dstMeta = destPath + ".meta";
 
-                if (File.Exists(dstMeta))
-                    File.Delete(dstMeta);
+                if (File.Exists(dstMeta)) File.Delete(dstMeta);
 
                 if (File.Exists(srcMeta))
-                {
                     File.Move(srcMeta, dstMeta);
-                }
                 else
-                {
-                    CreateMetaFromSourceOrDefault(destPath, destPath, entry.FileName.EndsWith(".cs", StringComparison.OrdinalIgnoreCase) ? PendingKind.Script : PendingKind.Image);
-                }
-
-                if (target == FeatureLocation.RuntimeFeature || target == FeatureLocation.RuntimeResources)
-                    EnsureRuntimeRootIfNeeded();
-
-                if (target == FeatureLocation.EditorFeature || target == FeatureLocation.EditorResources)
-                    EnsureEditorRootIfNeeded();
+                    CreateMetaFromSourceOrDefault(destPath, destPath, DetectPendingKindFromFileName(entry.FileName));
 
                 AssetDatabase.Refresh(ImportAssetOptions.ForceUpdate);
                 RefreshFeatureList();
@@ -995,7 +1726,7 @@ namespace TelleR
             }
             catch (Exception e)
             {
-                EditorUtility.DisplayDialog("Error", $"이동 실패:\n{e.Message}", "OK");
+                EditorUtility.DisplayDialog("Error", $"Move failed:\n{e.Message}", "OK");
             }
         }
 
@@ -1006,16 +1737,11 @@ namespace TelleR
 
             switch (location)
             {
-                case FeatureLocation.EditorFeature:
-                    return Path.Combine(editorRoot, featureName);
-                case FeatureLocation.RuntimeFeature:
-                    return Path.Combine(runtimeRoot, featureName);
-                case FeatureLocation.EditorResources:
-                    return Path.Combine(editorRoot, "Resources", featureName);
-                case FeatureLocation.RuntimeResources:
-                    return Path.Combine(runtimeRoot, "Resources", featureName);
-                default:
-                    return Path.Combine(runtimeRoot, featureName);
+                case FeatureLocation.EditorFeature: return Path.Combine(editorRoot, featureName);
+                case FeatureLocation.RuntimeFeature: return Path.Combine(runtimeRoot, featureName);
+                case FeatureLocation.EditorResources: return Path.Combine(editorRoot, "Resources", featureName);
+                case FeatureLocation.RuntimeResources: return Path.Combine(runtimeRoot, "Resources", featureName);
+                default: return Path.Combine(runtimeRoot, featureName);
             }
         }
 
@@ -1028,29 +1754,24 @@ namespace TelleR
             string editorRes = Path.Combine(currentPackagePath, "Editor", "Resources", featureName);
             string runtimeRes = Path.Combine(currentPackagePath, "Runtime", "Resources", featureName);
 
-            AddEntriesFromDir(results, editorFeature, FeatureLocation.EditorFeature, "Editor", new Color(0.6f, 0.8f, 1f));
-            AddEntriesFromDir(results, runtimeFeature, FeatureLocation.RuntimeFeature, "Runtime", new Color(0.6f, 1f, 0.6f));
-            AddEntriesFromDir(results, editorRes, FeatureLocation.EditorResources, "E/Res", new Color(0.85f, 0.75f, 1f));
-            AddEntriesFromDir(results, runtimeRes, FeatureLocation.RuntimeResources, "R/Res", new Color(1f, 0.85f, 0.6f));
+            AddEntriesFromDir(results, editorFeature, FeatureLocation.EditorFeature, "Editor", AccentBlue);
+            AddEntriesFromDir(results, runtimeFeature, FeatureLocation.RuntimeFeature, "Runtime", AccentGreen);
+            AddEntriesFromDir(results, editorRes, FeatureLocation.EditorResources, "E/Res", AccentPurple);
+            AddEntriesFromDir(results, runtimeRes, FeatureLocation.RuntimeResources, "R/Res", AccentAmber);
 
-            results = results
+            return results
                 .Where(r => !r.FileName.EndsWith(".meta", StringComparison.OrdinalIgnoreCase))
                 .OrderBy(r => r.Location.ToString())
                 .ThenBy(r => r.FileName)
                 .ToList();
-
-            return results;
         }
 
         private void AddEntriesFromDir(List<FeatureEntry> list, string dir, FeatureLocation loc, string tag, Color tagColor)
         {
             if (!Directory.Exists(dir)) return;
 
-            var files = Directory.GetFiles(dir, "*.*", SearchOption.AllDirectories)
-                .Where(f => !f.EndsWith(".meta", StringComparison.OrdinalIgnoreCase))
-                .ToList();
-
-            foreach (var f in files)
+            foreach (var f in Directory.GetFiles(dir, "*.*", SearchOption.AllDirectories)
+                .Where(f => !f.EndsWith(".meta", StringComparison.OrdinalIgnoreCase)))
             {
                 list.Add(new FeatureEntry
                 {
@@ -1084,12 +1805,8 @@ namespace TelleR
 
                 string editorRes = Path.Combine(editorPath, "Resources");
                 if (Directory.Exists(editorRes))
-                {
                     foreach (string dir in Directory.GetDirectories(editorRes))
-                    {
                         set.Add(Path.GetFileName(dir));
-                    }
-                }
             }
 
             if (Directory.Exists(runtimePath))
@@ -1103,568 +1820,21 @@ namespace TelleR
 
                 string runtimeRes = Path.Combine(runtimePath, "Resources");
                 if (Directory.Exists(runtimeRes))
-                {
                     foreach (string dir in Directory.GetDirectories(runtimeRes))
-                    {
                         set.Add(Path.GetFileName(dir));
-                    }
-                }
             }
 
             return set.OrderBy(x => x).ToList();
         }
 
-        private void ResetDropZoneStyle()
-        {
-            dropZone.style.borderTopColor = new Color(0.4f, 0.4f, 0.4f);
-            dropZone.style.borderBottomColor = new Color(0.4f, 0.4f, 0.4f);
-            dropZone.style.borderLeftColor = new Color(0.4f, 0.4f, 0.4f);
-            dropZone.style.borderRightColor = new Color(0.4f, 0.4f, 0.4f);
-            dropZone.style.backgroundColor = new Color(0.15f, 0.15f, 0.15f);
-        }
-
-        private void CreateStep3(VisualElement root)
-        {
-            step3Container = CreateStepContainer(root, "STEP 3", "버전 업데이트 & 배포");
-
-            var versionRow = new VisualElement();
-            versionRow.style.flexDirection = FlexDirection.Row;
-            versionRow.style.alignItems = Align.Center;
-            versionRow.style.marginBottom = 10;
-
-            var versionLabel = new Label("Version");
-            versionLabel.style.width = 60;
-            versionRow.Add(versionLabel);
-
-            versionField = new TextField();
-            versionField.value = "1.0.0";
-            versionField.style.width = 90;
-            versionField.style.marginRight = 15;
-            versionField.style.height = 24;
-            versionField.style.minHeight = 24;
-
-            versionRow.Add(versionField);
-
-            var patchBtn = new Button(() => BumpVersion("patch"));
-            patchBtn.text = "+0.0.1";
-            patchBtn.style.width = 64;
-            patchBtn.style.marginRight = 5;
-            versionRow.Add(patchBtn);
-
-            var minorBtn = new Button(() => BumpVersion("minor"));
-            minorBtn.text = "+0.1.0";
-            minorBtn.style.width = 64;
-            minorBtn.style.marginRight = 5;
-            versionRow.Add(minorBtn);
-
-            var majorBtn = new Button(() => BumpVersion("major"));
-            majorBtn.text = "+1.0.0";
-            majorBtn.style.width = 64;
-            versionRow.Add(majorBtn);
-
-            step3Container.Add(versionRow);
-
-            var saveBtn = new Button(SavePackageJson);
-            saveBtn.text = "💾 package.json 저장";
-            saveBtn.style.height = 32;
-            saveBtn.style.marginBottom = 10;
-            step3Container.Add(saveBtn);
-
-            var devModeSection = new VisualElement();
-            devModeSection.style.marginTop = 15;
-            devModeSection.style.paddingTop = 10;
-            devModeSection.style.borderTopWidth = 1;
-            devModeSection.style.borderTopColor = new Color(0.3f, 0.3f, 0.3f);
-
-            var devModeLabel = new Label("현재 모드");
-            devModeLabel.style.unityFontStyleAndWeight = FontStyle.Bold;
-            devModeLabel.style.marginBottom = 5;
-            devModeSection.Add(devModeLabel);
-
-            var devModeDesc = new Label("DEV MODE: file: 로컬 경로로 참조 (패키지 수정 가능)  /  DEPLOY MODE: git URL 참조 (일반적으로 읽기 전용)");
-            devModeDesc.style.color = Color.gray;
-            devModeDesc.style.fontSize = 11;
-            devModeDesc.style.marginBottom = 8;
-            devModeSection.Add(devModeDesc);
-
-            devModeButton = new Button(ToggleDevMode);
-            devModeButton.text = "개발 모드 활성화";
-            devModeButton.style.height = 28;
-            devModeSection.Add(devModeButton);
-
-            devModeStatus = new Label("");
-            devModeStatus.style.marginTop = 5;
-            devModeStatus.style.unityTextAlign = TextAnchor.MiddleCenter;
-            devModeStatus.style.fontSize = 11;
-            devModeSection.Add(devModeStatus);
-
-            step3Container.Add(devModeSection);
-        }
-
-        private VisualElement CreateStepContainer(VisualElement parent, string stepNum, string stepTitle)
-        {
-            var container = new VisualElement();
-            container.style.marginBottom = 14;
-            container.style.paddingTop = 0;
-            container.style.paddingBottom = 12;
-            container.style.paddingLeft = 12;
-            container.style.paddingRight = 12;
-            container.style.backgroundColor = new Color(0.20f, 0.20f, 0.20f);
-            container.style.borderTopLeftRadius = 12;
-            container.style.borderTopRightRadius = 12;
-            container.style.borderBottomLeftRadius = 12;
-            container.style.borderBottomRightRadius = 12;
-            container.style.borderTopWidth = 1;
-            container.style.borderBottomWidth = 1;
-            container.style.borderLeftWidth = 1;
-            container.style.borderRightWidth = 1;
-            container.style.borderTopColor = new Color(0.30f, 0.30f, 0.30f);
-            container.style.borderBottomColor = new Color(0.30f, 0.30f, 0.30f);
-            container.style.borderLeftColor = new Color(0.30f, 0.30f, 0.30f);
-            container.style.borderRightColor = new Color(0.30f, 0.30f, 0.30f);
-
-            var headerBar = new VisualElement();
-            headerBar.style.flexDirection = FlexDirection.Row;
-            headerBar.style.alignItems = Align.Center;
-            headerBar.style.backgroundColor = new Color(0.14f, 0.14f, 0.14f);
-            headerBar.style.marginLeft = -12;
-            headerBar.style.marginRight = -12;
-            headerBar.style.paddingLeft = 12;
-            headerBar.style.paddingRight = 12;
-            headerBar.style.paddingTop = 10;
-            headerBar.style.paddingBottom = 10;
-            headerBar.style.borderTopLeftRadius = 12;
-            headerBar.style.borderTopRightRadius = 12;
-            headerBar.style.borderBottomWidth = 1;
-            headerBar.style.borderBottomColor = new Color(0.26f, 0.26f, 0.26f);
-            container.Add(headerBar);
-
-            var badge = new Label(stepNum);
-            badge.style.fontSize = 11;
-            badge.style.unityFontStyleAndWeight = FontStyle.Bold;
-            badge.style.color = Color.white;
-            badge.style.backgroundColor = new Color(0.24f, 0.40f, 0.70f);
-            badge.style.paddingLeft = 8;
-            badge.style.paddingRight = 8;
-            badge.style.paddingTop = 3;
-            badge.style.paddingBottom = 3;
-            badge.style.borderTopLeftRadius = 10;
-            badge.style.borderTopRightRadius = 10;
-            badge.style.borderBottomLeftRadius = 10;
-            badge.style.borderBottomRightRadius = 10;
-            badge.style.marginRight = 10;
-            headerBar.Add(badge);
-
-            var titleLabel = new Label(stepTitle);
-            titleLabel.style.fontSize = 14;
-            titleLabel.style.unityFontStyleAndWeight = FontStyle.Bold;
-            titleLabel.style.color = new Color(0.92f, 0.92f, 0.92f);
-            headerBar.Add(titleLabel);
-
-            var body = new VisualElement();
-            body.style.paddingTop = 12;
-            container.Add(body);
-
-            parent.Add(container);
-            return body;
-        }
-
-
-        private TextField CreateTextField(VisualElement parent, string label, string defaultValue)
-        {
-            var row = new VisualElement();
-            row.style.flexDirection = FlexDirection.Row;
-            row.style.alignItems = Align.Center;
-            row.style.marginBottom = 6;
-            row.style.height = 28;
-
-            var lbl = new Label(label);
-            lbl.style.width = 130;
-            row.Add(lbl);
-
-            var field = new TextField();
-            field.value = defaultValue;
-            field.style.flexGrow = 1;
-            field.style.height = 24;
-            field.style.minHeight = 24;
-            row.Add(field);
-
-            parent.Add(row);
-            return field;
-        }
-
-
-        private void UpdateStepStates()
-        {
-            bool hasPackage = !string.IsNullOrEmpty(currentPackagePath) && Directory.Exists(currentPackagePath);
-
-            step2Container.SetEnabled(hasPackage);
-            step3Container.SetEnabled(hasPackage);
-
-            if (hasPackage)
-            {
-                step2Status.text = "";
-                step2Status.style.display = DisplayStyle.None;
-            }
-            else
-            {
-                step2Status.text = "← STEP 1을 먼저 완료하세요";
-                step2Status.style.display = DisplayStyle.Flex;
-            }
-        }
-
-        private void TryLoadLastPackage()
-        {
-            string lastPath = EditorPrefs.GetString(PREF_LAST_PATH, "");
-            if (!string.IsNullOrEmpty(lastPath) && Directory.Exists(lastPath))
-            {
-                LoadPackageFromPath(lastPath);
-            }
-        }
-
-        private void LoadExistingPackage()
-        {
-            string folderPath = EditorUtility.OpenFolderPanel("Select Package Folder", "", "");
-            if (string.IsNullOrEmpty(folderPath)) return;
-
-            string packageJsonPath = Path.Combine(folderPath, "package.json");
-            if (!File.Exists(packageJsonPath))
-            {
-                EditorUtility.DisplayDialog("Error", "package.json이 없는 폴더입니다.", "OK");
-                return;
-            }
-
-            LoadPackageFromPath(folderPath);
-        }
-
-        private void LoadPackageFromPath(string folderPath)
-        {
-            string packageJsonPath = Path.Combine(folderPath, "package.json");
-            if (!File.Exists(packageJsonPath)) return;
-
-            try
-            {
-                string json = File.ReadAllText(packageJsonPath);
-                var packageInfo = JsonUtility.FromJson<PackageJson>(json);
-
-                packageNameField.value = packageInfo.name ?? "com.teller.util";
-                displayNameField.value = packageInfo.displayName ?? "TelleR Utilities";
-                versionField.value = packageInfo.version ?? "1.0.0";
-                descriptionField.value = packageInfo.description ?? "";
-                unityVersionField.value = packageInfo.unity ?? "2021.3";
-                if (packageInfo.author != null)
-                    authorField.value = packageInfo.author.name ?? "TelleR";
-
-                currentPackagePath = folderPath;
-                EditorPrefs.SetString(PREF_LAST_PATH, folderPath);
-
-                step1Status.text = $"✓ 로드됨: {Path.GetFileName(folderPath)}";
-                step1Status.style.color = new Color(0.4f, 0.9f, 0.4f);
-
-                UpdateStepStates();
-                RefreshFeatureList();
-                UpdateDevModeUI();
-                EnsureMetaFiles(folderPath);
-                RefreshOrganizerFeatureOptions();
-                RefreshOrganizer();
-            }
-            catch (Exception e)
-            {
-                EditorUtility.DisplayDialog("Error", $"불러오기 실패:\n{e.Message}", "OK");
-            }
-        }
-
-        private void CreateNewPackage()
-        {
-            string folderPath = EditorUtility.SaveFolderPanel("패키지를 저장할 폴더 선택", "", "");
-            if (string.IsNullOrEmpty(folderPath)) return;
-
-            string packageName = packageNameField.value;
-            string packageRoot = Path.Combine(folderPath, packageName);
-
-            if (Directory.Exists(packageRoot))
-            {
-                if (EditorUtility.DisplayDialog("폴더 존재", $"'{packageName}' 폴더가 이미 있습니다. 불러올까요?", "불러오기", "취소"))
-                {
-                    LoadPackageFromPath(packageRoot);
-                }
-                return;
-            }
-
-            Directory.CreateDirectory(packageRoot);
-
-            currentPackagePath = packageRoot;
-            SavePackageJson();
-            CreateReadme(packageRoot);
-            CreateLicense(packageRoot);
-            CreateGitIgnore(packageRoot);
-
-            EditorPrefs.SetString(PREF_LAST_PATH, packageRoot);
-
-            step1Status.text = $"✓ 생성됨: {packageName}";
-            step1Status.style.color = new Color(0.4f, 0.9f, 0.4f);
-
-            UpdateStepStates();
-            RefreshFeatureList();
-            RefreshOrganizerFeatureOptions();
-            RefreshOrganizer();
-
-            EditorUtility.DisplayDialog("완료", "패키지가 생성되었습니다!\n\nSTEP 2에서 기능을 추가하세요.", "OK");
-        }
-
-        private void OpenPackageFolder()
-        {
-            if (string.IsNullOrEmpty(currentPackagePath))
-            {
-                EditorUtility.DisplayDialog("Error", "먼저 STEP 1을 완료하세요.", "OK");
-                return;
-            }
-
-            EditorUtility.RevealInFinder(currentPackagePath);
-        }
-
-        private void RefreshFeatureList()
-        {
-            featureListContainer.Clear();
-
-            if (string.IsNullOrEmpty(currentPackagePath)) return;
-
-            string editorPath = Path.Combine(currentPackagePath, "Editor");
-            string runtimePath = Path.Combine(currentPackagePath, "Runtime");
-            string editorResPath = Path.Combine(editorPath, "Resources");
-            string runtimeResPath = Path.Combine(runtimePath, "Resources");
-
-            var features = new Dictionary<string, (bool hasEditor, bool hasRuntime, bool hasEditorRes, bool hasRuntimeRes, int editorFiles, int runtimeFiles, int editorResFiles, int runtimeResFiles)>();
-
-            if (Directory.Exists(editorPath))
-            {
-                foreach (string dir in Directory.GetDirectories(editorPath))
-                {
-                    string name = Path.GetFileName(dir);
-                    if (name == "Resources") continue;
-
-                    int files = CountNonMetaFiles(dir);
-                    features[name] = (true, false, false, false, files, 0, 0, 0);
-                }
-            }
-
-            if (Directory.Exists(runtimePath))
-            {
-                foreach (string dir in Directory.GetDirectories(runtimePath))
-                {
-                    string name = Path.GetFileName(dir);
-                    if (name == "Resources") continue;
-
-                    int files = CountNonMetaFiles(dir);
-                    if (features.ContainsKey(name))
-                    {
-                        var existing = features[name];
-                        features[name] = (existing.hasEditor, true, existing.hasEditorRes, existing.hasRuntimeRes, existing.editorFiles, files, existing.editorResFiles, existing.runtimeResFiles);
-                    }
-                    else
-                    {
-                        features[name] = (false, true, false, false, 0, files, 0, 0);
-                    }
-                }
-            }
-
-            if (Directory.Exists(editorResPath))
-            {
-                foreach (string dir in Directory.GetDirectories(editorResPath))
-                {
-                    string name = Path.GetFileName(dir);
-                    int files = CountNonMetaFiles(dir);
-
-                    if (features.ContainsKey(name))
-                    {
-                        var existing = features[name];
-                        features[name] = (existing.hasEditor, existing.hasRuntime, true, existing.hasRuntimeRes, existing.editorFiles, existing.runtimeFiles, files, existing.runtimeResFiles);
-                    }
-                    else
-                    {
-                        features[name] = (false, false, true, false, 0, 0, files, 0);
-                    }
-                }
-            }
-
-            if (Directory.Exists(runtimeResPath))
-            {
-                foreach (string dir in Directory.GetDirectories(runtimeResPath))
-                {
-                    string name = Path.GetFileName(dir);
-                    int files = CountNonMetaFiles(dir);
-
-                    if (features.ContainsKey(name))
-                    {
-                        var existing = features[name];
-                        features[name] = (existing.hasEditor, existing.hasRuntime, existing.hasEditorRes, true, existing.editorFiles, existing.runtimeFiles, existing.editorResFiles, files);
-                    }
-                    else
-                    {
-                        features[name] = (false, false, false, true, 0, 0, 0, files);
-                    }
-                }
-            }
-
-            if (features.Count == 0)
-            {
-                AddEmptyLabel("기능 이름 입력 후 스크립트/이미지를 드래그하세요");
-                return;
-            }
-
-            foreach (var kvp in features.OrderBy(k => k.Key))
-            {
-                string featureName = kvp.Key;
-                var info = kvp.Value;
-
-                var row = new VisualElement();
-                row.style.width = new Length(48, LengthUnit.Percent);
-                row.style.marginRight = 10;
-                row.style.marginBottom = 10;
-                row.style.paddingTop = 10;
-                row.style.paddingBottom = 10;
-                row.style.paddingLeft = 10;
-                row.style.paddingRight = 10;
-                row.style.backgroundColor = new Color(0.18f, 0.18f, 0.18f);
-                row.style.borderTopLeftRadius = 10;
-                row.style.borderTopRightRadius = 10;
-                row.style.borderBottomLeftRadius = 10;
-                row.style.borderBottomRightRadius = 10;
-                row.style.borderTopWidth = 1;
-                row.style.borderBottomWidth = 1;
-                row.style.borderLeftWidth = 1;
-                row.style.borderRightWidth = 1;
-                row.style.borderTopColor = new Color(0.30f, 0.30f, 0.30f);
-                row.style.borderBottomColor = new Color(0.30f, 0.30f, 0.30f);
-                row.style.borderLeftColor = new Color(0.30f, 0.30f, 0.30f);
-                row.style.borderRightColor = new Color(0.30f, 0.30f, 0.30f);
-
-                row.style.flexDirection = FlexDirection.Row;
-                row.style.flexWrap = Wrap.NoWrap;
-                row.style.alignItems = Align.Center;
-                row.style.width = new Length(48, LengthUnit.Percent);
-                row.style.minHeight = 46;
-                row.style.marginRight = 10;
-                row.style.marginBottom = 10;
-                row.style.paddingLeft = 10;
-                row.style.paddingRight = 10;
-                row.style.paddingTop = 8;
-                row.style.paddingBottom = 8;
-                row.style.backgroundColor = new Color(0.16f, 0.16f, 0.16f);
-                row.style.borderTopLeftRadius = 10;
-                row.style.borderTopRightRadius = 10;
-                row.style.borderBottomLeftRadius = 10;
-                row.style.borderBottomRightRadius = 10;
-                row.style.borderTopWidth = 1;
-                row.style.borderBottomWidth = 1;
-                row.style.borderLeftWidth = 1;
-                row.style.borderRightWidth = 1;
-                row.style.borderTopColor = new Color(0.26f, 0.26f, 0.26f);
-                row.style.borderBottomColor = new Color(0.26f, 0.26f, 0.26f);
-                row.style.borderLeftColor = new Color(0.26f, 0.26f, 0.26f);
-                row.style.borderRightColor = new Color(0.26f, 0.26f, 0.26f);
-
-                var icon = new Label("📁");
-                icon.style.marginRight = 8;
-                row.Add(icon);
-
-                var label = new Label(featureName);
-                label.style.flexGrow = 1;
-                label.style.unityFontStyleAndWeight = FontStyle.Bold;
-                row.Add(label);
-
-                string typeText = "";
-                if (info.hasEditor) typeText += $"E:{info.editorFiles} ";
-                if (info.hasRuntime) typeText += $"R:{info.runtimeFiles} ";
-                if (info.hasEditorRes) typeText += $"E/Res:{info.editorResFiles} ";
-                if (info.hasRuntimeRes) typeText += $"R/Res:{info.runtimeResFiles} ";
-
-                typeText = typeText.Trim();
-
-                var countLabel = new Label(typeText);
-                countLabel.style.color = Color.gray;
-                countLabel.style.marginRight = 10;
-                row.Add(countLabel);
-
-                var focusBtn = new Button(() => FocusOrganizerFeature(featureName));
-                focusBtn.text = "정리";
-                focusBtn.style.width = 44;
-                focusBtn.style.height = 20;
-                focusBtn.style.marginRight = 6;
-                row.Add(focusBtn);
-
-                var deleteBtn = new Button(() => DeleteFeature(featureName));
-                deleteBtn.text = "✕";
-                deleteBtn.style.width = 24;
-                deleteBtn.style.height = 20;
-                deleteBtn.style.backgroundColor = new Color(0.5f, 0.2f, 0.2f);
-                row.Add(deleteBtn);
-
-                featureListContainer.Add(row);
-            }
-        }
-
         private int CountNonMetaFiles(string dir)
         {
             if (!Directory.Exists(dir)) return 0;
-            return Directory.GetFiles(dir, "*.*", SearchOption.AllDirectories).Count(f => !f.EndsWith(".meta", StringComparison.OrdinalIgnoreCase));
+            return Directory.GetFiles(dir, "*.*", SearchOption.AllDirectories)
+                .Count(f => !f.EndsWith(".meta", StringComparison.OrdinalIgnoreCase));
         }
 
-        private void FocusOrganizerFeature(string featureName)
-        {
-            if (organizerFeaturePopup == null) return;
-
-            RefreshOrganizerFeatureOptions();
-
-            int idx = organizerFeaturePopup.choices.IndexOf(featureName);
-            if (idx < 0) return;
-
-            organizerFeaturePopup.SetValueWithoutNotify(featureName);
-            RefreshOrganizer();
-        }
-
-        private void AddEmptyLabel(string text)
-        {
-            var label = new Label(text);
-            label.style.color = Color.gray;
-            label.style.unityTextAlign = TextAnchor.MiddleCenter;
-            label.style.marginTop = 10;
-            label.style.marginBottom = 10;
-            featureListContainer.Add(label);
-        }
-
-        private void DeleteFeature(string featureName)
-        {
-            if (!EditorUtility.DisplayDialog("삭제 확인", $"'{featureName}' 기능을 삭제할까요?", "삭제", "취소"))
-                return;
-
-            try
-            {
-                DeleteDirIfExists(Path.Combine(currentPackagePath, "Editor", featureName));
-                DeleteDirIfExists(Path.Combine(currentPackagePath, "Runtime", featureName));
-                DeleteDirIfExists(Path.Combine(currentPackagePath, "Editor", "Resources", featureName));
-                DeleteDirIfExists(Path.Combine(currentPackagePath, "Runtime", "Resources", featureName));
-
-                AssetDatabase.Refresh(ImportAssetOptions.ForceUpdate);
-                RefreshFeatureList();
-                RefreshOrganizerFeatureOptions();
-                RefreshOrganizer();
-            }
-            catch (Exception e)
-            {
-                EditorUtility.DisplayDialog("Error", $"삭제 실패:\n{e.Message}", "OK");
-            }
-        }
-
-        private void DeleteDirIfExists(string dir)
-        {
-            if (!Directory.Exists(dir)) return;
-
-            Directory.Delete(dir, true);
-
-            string metaPath = dir + ".meta";
-            if (File.Exists(metaPath)) File.Delete(metaPath);
-        }
+        // ─── Version & Deploy ───
 
         private void BumpVersion(string type)
         {
@@ -1677,18 +1847,9 @@ namespace TelleR
 
             switch (type)
             {
-                case "major":
-                    major++;
-                    minor = 0;
-                    patch = 0;
-                    break;
-                case "minor":
-                    minor++;
-                    patch = 0;
-                    break;
-                case "patch":
-                    patch++;
-                    break;
+                case "major": major++; minor = 0; patch = 0; break;
+                case "minor": minor++; patch = 0; break;
+                case "patch": patch++; break;
             }
 
             versionField.value = $"{major}.{minor}.{patch}";
@@ -1698,19 +1859,19 @@ namespace TelleR
         {
             if (string.IsNullOrEmpty(currentPackagePath))
             {
-                EditorUtility.DisplayDialog("Error", "먼저 패키지를 불러오세요.", "OK");
+                EditorUtility.DisplayDialog("Error", "Load a package first.", "OK");
                 return;
             }
 
             string manifestPath = Path.Combine(Application.dataPath, "..", "Packages", "manifest.json");
             if (!File.Exists(manifestPath))
             {
-                EditorUtility.DisplayDialog("Error", "manifest.json을 찾을 수 없습니다.", "OK");
+                EditorUtility.DisplayDialog("Error", "manifest.json not found.", "OK");
                 return;
             }
 
             string packageName = packageNameField.value;
-            string manifestContent = File.ReadAllText(manifestPath);
+            string manifestContent = ReadFileShared(manifestPath);
 
             bool isDevMode = IsDevModeEnabled(manifestContent, packageName);
 
@@ -1721,21 +1882,15 @@ namespace TelleR
                 {
                     gitUrl = $"https://github.com/USERNAME/{packageName}.git";
                     int result = EditorUtility.DisplayDialogComplex(
-                        "Git URL 입력",
-                        "배포 모드로 전환하려면 Git URL이 필요합니다.\n기본값을 사용하시겠습니까?",
-                        "기본값 사용",
-                        "취소",
-                        "");
+                        "Git URL",
+                        "Need Git URL for deploy mode.\nUse default?",
+                        "Use Default", "Cancel", "");
 
                     if (result != 0) return;
                 }
 
                 manifestContent = SetPackageSource(manifestContent, packageName, gitUrl);
-                File.WriteAllText(manifestPath, manifestContent);
-
-                devModeStatus.text = "✓ 배포 모드로 전환됨 (읽기 전용)";
-                devModeStatus.style.color = Color.gray;
-                devModeButton.text = "개발 모드 활성화";
+                WriteFileShared(manifestPath, manifestContent);
             }
             else
             {
@@ -1743,22 +1898,17 @@ namespace TelleR
 
                 string currentUrl = GetCurrentPackageSource(manifestContent, packageName);
                 if (!string.IsNullOrEmpty(currentUrl) && currentUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase))
-                {
                     EditorPrefs.SetString($"UPMCreator_GitUrl_{packageName}", currentUrl);
-                }
 
                 manifestContent = SetPackageSource(manifestContent, packageName, localPath);
-                File.WriteAllText(manifestPath, manifestContent);
-
-                devModeStatus.text = "✓ 개발 모드 활성화 (수정 가능)";
-                devModeStatus.style.color = new Color(0.4f, 0.9f, 0.4f);
-                devModeButton.text = "배포 모드로 전환";
+                WriteFileShared(manifestPath, manifestContent);
             }
+
+            UpdateDevModeUI();
 
             EditorApplication.delayCall += () =>
             {
                 AssetDatabase.Refresh(ImportAssetOptions.ForceUpdate);
-
                 EditorApplication.delayCall += () =>
                 {
                     UpdateDevModeUI();
@@ -1812,6 +1962,16 @@ namespace TelleR
             return manifestContent.Substring(0, startIndex) + newSource + manifestContent.Substring(endIndex);
         }
 
+        private void UpdateStep1Summary(string packageName)
+        {
+            if (step1SummaryLabel != null)
+            {
+                step1SummaryLabel.text = packageName;
+                step1SummaryLabel.style.color = AccentGreen;
+                step1SummaryLabel.style.unityFontStyleAndWeight = FontStyle.Bold;
+            }
+        }
+
         private void UpdateDevModeUI()
         {
             if (string.IsNullOrEmpty(currentPackagePath) || devModeButton == null || devModeStatus == null) return;
@@ -1819,57 +1979,60 @@ namespace TelleR
             string manifestPath = Path.Combine(Application.dataPath, "..", "Packages", "manifest.json");
             if (!File.Exists(manifestPath))
             {
-                devModeStatus.text = "현재 모드 : UNKNOWN\nmanifest.json을 찾을 수 없습니다.";
-                devModeStatus.style.color = Color.gray;
-                devModeButton.text = "개발 모드 활성화";
+                devModeStatus.text = "manifest.json not found";
+                devModeStatus.style.color = TextMuted;
+                SetBorder(devModeStatus.style, 1, Border);
+                devModeButton.text = "Enable Dev Mode";
                 return;
             }
 
             string packageName = packageNameField.value;
-            string manifestContent = File.ReadAllText(manifestPath);
+            string manifestContent = ReadFileShared(manifestPath);
             string source = GetCurrentPackageSource(manifestContent, packageName);
             bool isDevMode = !string.IsNullOrEmpty(source) && source.StartsWith("file:", StringComparison.OrdinalIgnoreCase);
 
             if (isDevMode)
             {
-                devModeStatus.text = $"현재 모드 : DEV MODE (패키지 수정 가능)\nmanifest: {source}";
-                devModeStatus.style.color = new Color(0.45f, 0.95f, 0.45f);
-                devModeButton.text = "배포 모드로 전환";
+                devModeStatus.text = $"DEV MODE  -  local path (editable)\n{source}";
+                devModeStatus.style.color = AccentGreen;
+                SetBorder(devModeStatus.style, 1, new Color(AccentGreen.r, AccentGreen.g, AccentGreen.b, 0.4f));
+                devModeStatus.style.backgroundColor = new Color(AccentGreen.r, AccentGreen.g, AccentGreen.b, 0.08f);
+                devModeButton.text = "Deploy Mode (git URL)";
+                devModeButton.style.backgroundColor = new Color(AccentAmber.r, AccentAmber.g, AccentAmber.b, 0.15f);
+                devModeButton.style.color = AccentAmber;
+                SetBorder(devModeButton.style, 1, new Color(AccentAmber.r, AccentAmber.g, AccentAmber.b, 0.3f));
             }
             else
             {
-                devModeStatus.text = $"현재 모드 : DEPLOY MODE (일반적으로 읽기 전용)\nmanifest: {(string.IsNullOrEmpty(source) ? "(not found)" : source)}";
-                devModeStatus.style.color = Color.gray;
-                devModeButton.text = "개발 모드로 전환";
+                devModeStatus.text = $"DEPLOY MODE  -  git URL (read-only)\n{(string.IsNullOrEmpty(source) ? "(not registered)" : source)}";
+                devModeStatus.style.color = AccentAmber;
+                SetBorder(devModeStatus.style, 1, new Color(AccentAmber.r, AccentAmber.g, AccentAmber.b, 0.4f));
+                devModeStatus.style.backgroundColor = new Color(AccentAmber.r, AccentAmber.g, AccentAmber.b, 0.08f);
+                devModeButton.text = "Dev Mode (local path)";
+                devModeButton.style.backgroundColor = new Color(AccentGreen.r, AccentGreen.g, AccentGreen.b, 0.15f);
+                devModeButton.style.color = AccentGreen;
+                SetBorder(devModeButton.style, 1, new Color(AccentGreen.r, AccentGreen.g, AccentGreen.b, 0.3f));
             }
         }
+
+        // ─── File System Helpers ───
 
         private void EnsureMetaFiles(string packagePath)
         {
             string[] filesToCheck = { "README.md", "LICENSE.md", "package.json", "CHANGELOG.md" };
-
             foreach (string fileName in filesToCheck)
             {
                 string filePath = Path.Combine(packagePath, fileName);
-                string metaPath = filePath + ".meta";
-
-                if (File.Exists(filePath) && !File.Exists(metaPath))
-                {
+                if (File.Exists(filePath) && !File.Exists(filePath + ".meta"))
                     CreateFileMeta(filePath);
-                }
             }
 
             string[] foldersToCheck = { "Editor", "Runtime" };
-
             foreach (string folderName in foldersToCheck)
             {
                 string folderPath = Path.Combine(packagePath, folderName);
-                string metaPath = folderPath + ".meta";
-
-                if (Directory.Exists(folderPath) && !File.Exists(metaPath))
-                {
+                if (Directory.Exists(folderPath) && !File.Exists(folderPath + ".meta"))
                     CreateFolderMeta(packagePath, folderName);
-                }
             }
         }
 
@@ -1877,7 +2040,7 @@ namespace TelleR
         {
             if (string.IsNullOrEmpty(currentPackagePath))
             {
-                EditorUtility.DisplayDialog("Error", "먼저 STEP 1을 완료하세요.", "OK");
+                EditorUtility.DisplayDialog("Error", "Complete Step 1 first.", "OK");
                 return;
             }
 
@@ -1897,22 +2060,20 @@ namespace TelleR
 
             if (!File.Exists(path + ".meta")) CreateFileMeta(path);
 
-            EditorUtility.DisplayDialog("저장 완료", $"v{versionField.value} 저장됨\n\nGitHub Desktop에서 Commit & Push", "OK");
+            EditorUtility.DisplayDialog("Saved", $"v{versionField.value} saved.\n\nCommit & Push via GitHub Desktop.", "OK");
         }
 
         private void CreateReadme(string root)
         {
             string path = Path.Combine(root, "README.md");
-            string content = $"# {displayNameField.value}\n\n{descriptionField.value}\n\n## Installation\n\nPackage Manager → Add package from git URL\n\n## License\n\nMIT License\n";
-            File.WriteAllText(path, content);
+            File.WriteAllText(path, $"# {displayNameField.value}\n\n{descriptionField.value}\n\n## Installation\n\nPackage Manager > Add package from git URL\n\n## License\n\nMIT License\n");
             CreateFileMeta(path);
         }
 
         private void CreateLicense(string root)
         {
             string path = Path.Combine(root, "LICENSE.md");
-            string content = $"MIT License\n\nCopyright (c) {DateTime.Now.Year} {authorField.value}\n\nPermission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the \"Software\"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.\n";
-            File.WriteAllText(path, content);
+            File.WriteAllText(path, $"MIT License\n\nCopyright (c) {DateTime.Now.Year} {authorField.value}\n\nPermission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the \"Software\"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.\n");
             CreateFileMeta(path);
         }
 
@@ -1928,12 +2089,8 @@ namespace TelleR
             {
                 Directory.CreateDirectory(editorPath);
                 CreateFolderMeta(currentPackagePath, "Editor");
-                CreateEditorAsmdef(editorPath);
             }
-            else
-            {
-                CreateEditorAsmdef(editorPath);
-            }
+            CreateEditorAsmdef(editorPath);
         }
 
         private void EnsureRuntimeRootIfNeeded()
@@ -1943,20 +2100,12 @@ namespace TelleR
             {
                 Directory.CreateDirectory(runtimePath);
                 CreateFolderMeta(currentPackagePath, "Runtime");
-                CreateRuntimeAsmdef(runtimePath);
-
-                string editorPath = Path.Combine(currentPackagePath, "Editor");
-                if (Directory.Exists(editorPath))
-                    UpdateEditorAsmdefWithRuntimeReference(editorPath);
             }
-            else
-            {
-                CreateRuntimeAsmdef(runtimePath);
+            CreateRuntimeAsmdef(runtimePath);
 
-                string editorPath = Path.Combine(currentPackagePath, "Editor");
-                if (Directory.Exists(editorPath))
-                    UpdateEditorAsmdefWithRuntimeReference(editorPath);
-            }
+            string editorPath = Path.Combine(currentPackagePath, "Editor");
+            if (Directory.Exists(editorPath))
+                UpdateEditorAsmdefWithRuntimeReference(editorPath);
         }
 
         private void CreateEditorAsmdef(string editorPath)
@@ -1969,8 +2118,7 @@ namespace TelleR
             bool hasRuntime = Directory.Exists(runtimePath);
             string references = hasRuntime ? $"\"{ConvertToAsmdefName(packageNameField.value)}\"" : "";
 
-            string content = $"{{\n  \"name\": \"{asmName}\",\n  \"rootNamespace\": \"{ConvertToNamespace(packageNameField.value)}\",\n  \"includePlatforms\": [\"Editor\"],\n  \"excludePlatforms\": [],\n  \"references\": [{references}]\n}}";
-            File.WriteAllText(path, content);
+            File.WriteAllText(path, $"{{\n  \"name\": \"{asmName}\",\n  \"rootNamespace\": \"{ConvertToNamespace(packageNameField.value)}\",\n  \"includePlatforms\": [\"Editor\"],\n  \"excludePlatforms\": [],\n  \"references\": [{references}]\n}}");
             CreateAsmdefMeta(path);
         }
 
@@ -1980,8 +2128,7 @@ namespace TelleR
             string path = Path.Combine(runtimePath, asmName + ".asmdef");
             if (File.Exists(path)) return;
 
-            string content = $"{{\n  \"name\": \"{asmName}\",\n  \"rootNamespace\": \"{ConvertToNamespace(packageNameField.value)}\",\n  \"includePlatforms\": [],\n  \"excludePlatforms\": [],\n  \"references\": []\n}}";
-            File.WriteAllText(path, content);
+            File.WriteAllText(path, $"{{\n  \"name\": \"{asmName}\",\n  \"rootNamespace\": \"{ConvertToNamespace(packageNameField.value)}\",\n  \"includePlatforms\": [],\n  \"excludePlatforms\": [],\n  \"references\": []\n}}");
             CreateAsmdefMeta(path);
         }
 
@@ -1992,11 +2139,9 @@ namespace TelleR
             if (!File.Exists(path)) return;
 
             string runtimeAsmName = ConvertToAsmdefName(packageNameField.value);
-            string content = $"{{\n  \"name\": \"{asmName}\",\n  \"rootNamespace\": \"{ConvertToNamespace(packageNameField.value)}\",\n  \"includePlatforms\": [\"Editor\"],\n  \"excludePlatforms\": [],\n  \"references\": [\"{runtimeAsmName}\"]\n}}";
-            File.WriteAllText(path, content);
+            File.WriteAllText(path, $"{{\n  \"name\": \"{asmName}\",\n  \"rootNamespace\": \"{ConvertToNamespace(packageNameField.value)}\",\n  \"includePlatforms\": [\"Editor\"],\n  \"excludePlatforms\": [],\n  \"references\": [\"{runtimeAsmName}\"]\n}}");
 
-            string meta = path + ".meta";
-            if (!File.Exists(meta)) CreateAsmdefMeta(path);
+            if (!File.Exists(path + ".meta")) CreateAsmdefMeta(path);
         }
 
         private string ConvertToAsmdefName(string packageName)
@@ -2012,10 +2157,9 @@ namespace TelleR
             return string.IsNullOrEmpty(result) ? "Package" : result;
         }
 
-        private string ConvertToNamespace(string packageName)
-        {
-            return ConvertToAsmdefName(packageName);
-        }
+        private string ConvertToNamespace(string packageName) => ConvertToAsmdefName(packageName);
+
+        // ─── Meta Generators ───
 
         private void CreateMetaFromSourceOrDefault(string sourceFullPath, string destFilePath, PendingKind kind)
         {
@@ -2031,6 +2175,7 @@ namespace TelleR
             }
 
             if (kind == PendingKind.Script) CreateScriptMeta(destFilePath);
+            else if (kind == PendingKind.Shader) CreateShaderMeta(destFilePath);
             else CreateFileMeta(destFilePath);
         }
 
@@ -2050,16 +2195,10 @@ namespace TelleR
                         replaced = true;
                     }
                     else
-                    {
                         lines.Add(line);
-                    }
                 }
 
-                if (!replaced)
-                {
-                    lines.Insert(1, "guid: " + newGuid);
-                }
-
+                if (!replaced) lines.Insert(1, "guid: " + newGuid);
                 return string.Join("\n", lines) + "\n";
             }
         }
@@ -2076,6 +2215,12 @@ namespace TelleR
             File.WriteAllText(filePath + ".meta", $"fileFormatVersion: 2\nguid: {guid}\nMonoImporter:\n  externalObjects: {{}}\n  serializedVersion: 2\n  defaultReferences: []\n  executionOrder: 0\n  icon: {{instanceID: 0}}\n  userData: \n  assetBundleName: \n  assetBundleVariant: \n");
         }
 
+        private void CreateShaderMeta(string filePath)
+        {
+            string guid = GUID.Generate().ToString().Replace("-", "");
+            File.WriteAllText(filePath + ".meta", $"fileFormatVersion: 2\nguid: {guid}\nShaderImporter:\n  externalObjects: {{}}\n  defaultTextures: []\n  nonModifiableTextures: []\n  userData: \n  assetBundleName: \n  assetBundleVariant: \n");
+        }
+
         private void CreateAsmdefMeta(string filePath)
         {
             string guid = GUID.Generate().ToString().Replace("-", "");
@@ -2087,6 +2232,8 @@ namespace TelleR
             string guid = GUID.Generate().ToString().Replace("-", "");
             File.WriteAllText(Path.Combine(parentPath, folderName + ".meta"), $"fileFormatVersion: 2\nguid: {guid}\nfolderAsset: yes\nDefaultImporter:\n  externalObjects: {{}}\n  userData: \n  assetBundleName: \n  assetBundleVariant: \n");
         }
+
+        // ─── Detection Helpers ───
 
         private bool IsEditorScript(string content)
         {
@@ -2109,16 +2256,49 @@ namespace TelleR
             return ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".tga" || ext == ".psd" || ext == ".gif" || ext == ".bmp" || ext == ".hdr" || ext == ".exr" || ext == ".webp";
         }
 
+        private bool IsShaderAsset(string assetPath)
+        {
+            string ext = Path.GetExtension(assetPath)?.ToLowerInvariant();
+            return ext == ".shader" || ext == ".shadergraph" || ext == ".shadersubgraph" || ext == ".hlsl" || ext == ".cginc" || ext == ".compute";
+        }
+
+        private bool IsResourceAsset(string assetPath)
+        {
+            string ext = Path.GetExtension(assetPath)?.ToLowerInvariant();
+            return ext == ".mat" || ext == ".asset" || ext == ".preset" || ext == ".physicmaterial"
+                || ext == ".physicsmaterial" || ext == ".cubemap" || ext == ".flare"
+                || ext == ".renderTexture" || ext == ".lighting" || ext == ".guiskin"
+                || ext == ".fontsettings" || ext == ".mixer" || ext == ".controller"
+                || ext == ".overrideController" || ext == ".anim" || ext == ".mask"
+                || ext == ".signal" || ext == ".playable" || ext == ".brush";
+        }
+
         private string SafeReadAllText(string fullPath)
         {
-            try
-            {
-                return File.ReadAllText(fullPath);
-            }
-            catch
-            {
-                return "";
-            }
+            try { return File.ReadAllText(fullPath); }
+            catch { return ""; }
+        }
+
+        private string ReadFileShared(string path)
+        {
+            using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+            using (var sr = new StreamReader(fs))
+                return sr.ReadToEnd();
+        }
+
+        private void WriteFileShared(string path, string content)
+        {
+            using (var fs = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.ReadWrite))
+            using (var sw = new StreamWriter(fs))
+                sw.Write(content);
+        }
+
+        private PendingKind DetectPendingKindFromFileName(string fileName)
+        {
+            if (fileName.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)) return PendingKind.Script;
+            if (IsShaderAsset(fileName)) return PendingKind.Shader;
+            if (IsImageAsset(fileName)) return PendingKind.Image;
+            return PendingKind.Resource;
         }
 
         private string NormalizeFeatureName(string value)
@@ -2126,6 +2306,8 @@ namespace TelleR
             if (value == null) return "";
             return value.Trim().Replace(" ", "");
         }
+
+        // ─── Data Classes ───
 
         [Serializable]
         private class PackageJson

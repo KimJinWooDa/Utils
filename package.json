@@ -1,6 +1,6 @@
 {
   "name": "com.teller.util",
-  "version": "1.0.19",
+  "version": "1.0.20",
   "displayName": "TelleR Utilities",
   "description": "Unity editor utilities by TelleR - Fast Clone, and more",
   "unity": "2021.3",
