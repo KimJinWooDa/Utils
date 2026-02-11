@@ -245,7 +245,6 @@ namespace TelleR
                 if (startCollapsed)
                     body.style.display = DisplayStyle.None;
 
-                header.style.cursor = new Cursor();
                 header.RegisterCallback<ClickEvent>(evt =>
                 {
                     bool isHidden = body.style.display == DisplayStyle.None;
