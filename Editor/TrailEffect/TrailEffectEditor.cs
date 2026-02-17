@@ -6,7 +6,7 @@ namespace TelleR
 {
     [CustomEditor(typeof(TrailEffect))]
     [CanEditMultipleObjects]
-    public class TrailEffectEditor : UnityEditor.Editor
+    public class TrailEffectEditor : Editor
     {
         SerializedProperty profile, mode;
         SerializedProperty trailColor, colorOverLifetime, duration, snapshotsPerSecond;
@@ -354,16 +354,13 @@ namespace TelleR
                 return;
             }
 
-            string directory = System.IO.Path.GetDirectoryName(AssetDatabase.GetAssetPath(MonoScript.FromMonoBehaviour(fx)));
-            if (string.IsNullOrEmpty(directory))
-                directory = "Assets/00_Drone/TrailEffect";
-
-            string path = $"{directory}/TrailFX.mat";
-            path = AssetDatabase.GenerateUniqueAssetPath(path);
+            string path = EditorUtility.SaveFilePanelInProject(
+                "Save Trail Material", "TrailFX", "mat", "Save location");
+            if (string.IsNullOrEmpty(path)) return;
 
             var mat = new Material(shader)
             {
-                name = "TrailFX",
+                name = System.IO.Path.GetFileNameWithoutExtension(path),
                 enableInstancing = true,
                 renderQueue = (int)RenderQueue.Transparent
             };
