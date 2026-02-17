@@ -3,5 +3,9 @@
   "rootNamespace": "Teller.Util",
   "includePlatforms": [],
   "excludePlatforms": [],
-  "references": []
+  "references": [
+    "Unity.RenderPipelines.Universal.Runtime",
+    "Unity.RenderPipelines.Core.Runtime",
+    "Unity.XR.Management"
+  ]
 }
