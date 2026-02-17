@@ -27,7 +27,8 @@ namespace TelleR
         [Range(0f, 5f)] public float FresnelPower = 3f;
         [Range(0f, 2f)] public float FresnelIntensity = 0f;
         public Texture2D StampTexture;
-        [Range(0.1f, 10f)] public float StampSize = 1f;
+        [Range(0.1f, 10f)] public float StampSizeStart = 1f;
+        [Range(0.1f, 10f)] public float StampSizeEnd = 1f;
         public StampStyle StampStyle = StampStyle.Follow;
         [Range(1, 10)] public int StampCount = 4;
         [Range(1f, 30f)] public float StampFollowSpeed = 8f;

@@ -12,12 +12,10 @@ namespace TelleR
         SerializedProperty trailColor, colorOverLifetime, duration, snapshotsPerSecond;
         SerializedProperty scaleStart, scaleEnd;
         SerializedProperty fresnelPower, fresnelIntensity;
-        SerializedProperty stampTexture, stampSize, stampStyle, stampCount, stampFollowSpeed, stampSpacing;
+        SerializedProperty stampTexture, stampSizeStart, stampSizeEnd, stampStyle, stampCount, stampFollowSpeed, stampSpacing;
         SerializedProperty preventOverlap;
         SerializedProperty maxSnapshots, minDistance;
         SerializedProperty trailMaterial;
-
-        static readonly GUIStyle hintStyle = null;
 
         void OnEnable()
         {
@@ -32,7 +30,8 @@ namespace TelleR
             fresnelPower = serializedObject.FindProperty("FresnelPower");
             fresnelIntensity = serializedObject.FindProperty("FresnelIntensity");
             stampTexture = serializedObject.FindProperty("StampTexture");
-            stampSize = serializedObject.FindProperty("StampSize");
+            stampSizeStart = serializedObject.FindProperty("StampSizeStart");
+            stampSizeEnd = serializedObject.FindProperty("StampSizeEnd");
             stampStyle = serializedObject.FindProperty("StampStyle");
             stampCount = serializedObject.FindProperty("StampCount");
             stampFollowSpeed = serializedObject.FindProperty("StampFollowSpeed");
@@ -64,7 +63,6 @@ namespace TelleR
             {
                 profileSO = new SerializedObject((TrailEffectProfile)profile.objectReferenceValue);
                 profileSO.Update();
-
                 EditorGUILayout.HelpBox("\u2611 Check = use local value  |  Uncheck = use Profile value", MessageType.Info);
             }
 
@@ -73,22 +71,19 @@ namespace TelleR
             Field(hasProfile, profileSO, mode, "Mode", "overrideMode", "Mode");
             Hint("Color=드론 메쉬 잔상, TextureStamp=텍스쳐 빌보드 (Follow/Trail 스타일)");
 
-            TrailMode currentMode;
-            if (hasProfile && profileSO != null)
-            {
-                var overrideModeProp = serializedObject.FindProperty("overrideMode");
-                bool useLocal = overrideModeProp != null && overrideModeProp.boolValue;
-                if (useLocal)
-                    currentMode = (TrailMode)mode.intValue;
-                else
-                    currentMode = (TrailMode)profileSO.FindProperty("Mode").intValue;
-            }
-            else
-            {
-                currentMode = (TrailMode)mode.intValue;
-            }
+            TrailMode currentMode = ResolveEnum<TrailMode>(hasProfile, profileSO, mode, "Mode", "overrideMode");
+            bool isColor = currentMode == TrailMode.Color;
+            bool isStamp = currentMode == TrailMode.TextureStamp;
 
-            // ── Appearance ──
+            StampStyle currentStyle = StampStyle.Follow;
+            if (isStamp)
+                currentStyle = ResolveEnum<StampStyle>(hasProfile, profileSO, stampStyle, "StampStyle", "overrideStampStyle");
+
+            bool isStampFollow = isStamp && currentStyle == StampStyle.Follow;
+            bool isStampTrail = isStamp && currentStyle == StampStyle.Trail;
+            bool usesSnapshots = isColor || isStampTrail;
+
+            // ── Appearance (공통) ──
             Section("Appearance");
             Field(hasProfile, profileSO, trailColor, "TrailColor", "overrideTrailColor", "Trail Color");
             Hint("Gradient 미사용 시 기본색. 예: 빨강=(1,0,0,0.6), alpha로 기본 투명도 조절");
@@ -96,29 +91,24 @@ namespace TelleR
             Field(hasProfile, profileSO, colorOverLifetime, "ColorOverLifetime", "overrideColorOverLifetime", "Color Over Lifetime");
             Hint("시간에 따라 색/투명도 변화. 예: 시안->파랑 페이드아웃. 키 2개 이상이면 TrailColor 대신 사용");
 
-            Field(hasProfile, profileSO, duration, "Duration", "overrideDuration", "Duration");
-            Hint("잔상 수명. 예: 0.3=짧고 빠른 잔상, 1.0=긴 꼬리, 2.0=느린 페이드");
+            // Color 전용: Scale (메쉬 배율)
+            if (isColor)
+            {
+                Field(hasProfile, profileSO, scaleStart, "ScaleStart", "overrideScaleStart", "Scale Start");
+                Hint("잔상 시작 배율. 예: 1.0=원본, 1.2=살짝 크게 시작, 0.8=작게 시작");
 
-            Field(hasProfile, profileSO, snapshotsPerSecond, "SnapshotsPerSecond", "overrideSnapshotsPerSecond", "Snapshots/Sec");
-            Hint("초당 잔상 수. 예: 10=가벼운 효과, 30=부드러운 트레일, 60=매우 촘촘 (성능 주의)");
+                Field(hasProfile, profileSO, scaleEnd, "ScaleEnd", "overrideScaleEnd", "Scale End");
+                Hint("잔상 끝 배율. 예: 0.5=줄어들며 소멸, 1.5=커지며 소멸");
+            }
 
-            Field(hasProfile, profileSO, scaleStart, "ScaleStart", "overrideScaleStart", "Scale Start");
-            Hint("잔상 시작 크기. 예: 1.0=원본, 1.2=살짝 크게 시작, 0.8=작게 시작");
-
-            Field(hasProfile, profileSO, scaleEnd, "ScaleEnd", "overrideScaleEnd", "Scale End");
-            Hint("잔상 끝 크기. 예: 0.5=줄어들며 소멸, 1.5=커지며 소멸, Start>End=축소 효과");
-
-            // ── Fresnel (Color only) ──
-            if (currentMode == TrailMode.Color)
+            // ── Fresnel (Color 전용) ──
+            if (isColor)
             {
                 Section("Fresnel");
                 Field(hasProfile, profileSO, fresnelIntensity, "FresnelIntensity", "overrideFresnelIntensity", "Intensity");
                 Hint("가장자리 빛나는 정도. 예: 0=끔, 0.5=은은한 림라이트, 1.5=강한 네온 느낌");
 
-                var overrideFI = serializedObject.FindProperty("overrideFresnelIntensity");
-                float fVal = (hasProfile && !overrideFI.boolValue && profileSO != null)
-                    ? profileSO.FindProperty("FresnelIntensity").floatValue
-                    : fresnelIntensity.floatValue;
+                float fVal = ResolveFloat(hasProfile, profileSO, fresnelIntensity, "FresnelIntensity", "overrideFresnelIntensity");
                 if (fVal > 0.001f)
                 {
                     Field(hasProfile, profileSO, fresnelPower, "FresnelPower", "overrideFresnelPower", "Power");
@@ -126,36 +116,23 @@ namespace TelleR
                 }
             }
 
-            // ── Mode-specific ──
-            if (currentMode == TrailMode.TextureStamp)
+            // ── Texture Stamp (TextureStamp 전용) ──
+            if (isStamp)
             {
                 Section("Texture Stamp");
                 Field(hasProfile, profileSO, stampTexture, "StampTexture", "overrideStampTexture", "Texture");
                 Hint("항상 카메라를 향하는 빌보드 텍스쳐. 원형/별/하트 등 알파 텍스쳐 사용");
 
-                Field(hasProfile, profileSO, stampSize, "StampSize", "overrideStampSize", "Size");
-                Hint("빌보드 크기. 예: 0.5=작은 점, 1.0=기본, 3.0=큰 이펙트");
+                Field(hasProfile, profileSO, stampSizeStart, "StampSizeStart", "overrideStampSizeStart", "Size Start");
+                Hint("빌보드 시작 크기. Follow=첫 번째 스탬프, Trail=생성 직후");
+
+                Field(hasProfile, profileSO, stampSizeEnd, "StampSizeEnd", "overrideStampSizeEnd", "Size End");
+                Hint("빌보드 끝 크기. Follow=마지막 스탬프, Trail=소멸 직전");
 
                 Field(hasProfile, profileSO, stampStyle, "StampStyle", "overrideStampStyle", "Style");
                 Hint("Follow=드론 뒤를 졸졸 따라다님, Trail=지나간 자리에 흔적을 남기고 서서히 사라짐");
 
-                // Style에 따라 현재 값 가져오기
-                StampStyle currentStyle;
-                if (hasProfile && profileSO != null)
-                {
-                    var overrideStyleProp = serializedObject.FindProperty("overrideStampStyle");
-                    bool useLocalStyle = overrideStyleProp != null && overrideStyleProp.boolValue;
-                    if (useLocalStyle)
-                        currentStyle = (StampStyle)stampStyle.intValue;
-                    else
-                        currentStyle = (StampStyle)profileSO.FindProperty("StampStyle").intValue;
-                }
-                else
-                {
-                    currentStyle = (StampStyle)stampStyle.intValue;
-                }
-
-                if (currentStyle == StampStyle.Follow)
+                if (isStampFollow)
                 {
                     Field(hasProfile, profileSO, stampCount, "StampCount", "overrideStampCount", "Count");
                     Hint("따라다니는 스탬프 개수. 예: 3=가벼운 효과, 5=기본, 8=긴 꼬리");
@@ -168,16 +145,30 @@ namespace TelleR
                 }
             }
 
-            // ── Performance ──
-            Section("Performance");
-            Field(hasProfile, profileSO, preventOverlap, "PreventOverlap", "overridePreventOverlap", "Prevent Overlap");
-            Hint("켜면 잔상끼리 겹쳐도 뭉쳐 보이지 않음. 끄면 겹치는 부분이 더 불투명해짐");
+            // ── Snapshot (Color, TextureStamp+Trail만) ──
+            if (usesSnapshots)
+            {
+                Section("Snapshot");
+                Field(hasProfile, profileSO, duration, "Duration", "overrideDuration", "Duration");
+                Hint("잔상 수명. 예: 0.3=짧고 빠른 잔상, 1.0=긴 꼬리, 2.0=느린 페이드");
 
-            Field(hasProfile, profileSO, maxSnapshots, "MaxSnapshots", "overrideMaxSnapshots", "Max Snapshots");
-            Hint("최대 잔상 개수. 예: 16=가벼운 효과, 32=기본, 64=긴 꼬리 (GPU 버퍼 크기)");
+                Field(hasProfile, profileSO, snapshotsPerSecond, "SnapshotsPerSecond", "overrideSnapshotsPerSecond", "Snapshots/Sec");
+                Hint("초당 잔상 수. 예: 10=가벼운 효과, 30=부드러운 트레일, 60=매우 촘촘 (성능 주의)");
+            }
 
-            Field(hasProfile, profileSO, minDistance, "MinDistance", "overrideMinDistance", "Min Distance");
-            Hint("잔상 간 최소 간격. 예: 0.01=거의 연속, 0.1=적당한 간격, 0.5=듬성듬성");
+            // ── Performance (스냅샷 사용 모드만) ──
+            if (usesSnapshots)
+            {
+                Section("Performance");
+                Field(hasProfile, profileSO, preventOverlap, "PreventOverlap", "overridePreventOverlap", "Prevent Overlap");
+                Hint("켜면 잔상끼리 겹쳐도 뭉쳐 보이지 않음. 끄면 겹치는 부분이 더 불투명해짐");
+
+                Field(hasProfile, profileSO, maxSnapshots, "MaxSnapshots", "overrideMaxSnapshots", "Max Snapshots");
+                Hint("최대 잔상 개수. 예: 16=가벼운 효과, 32=기본, 64=긴 꼬리 (GPU 버퍼 크기)");
+
+                Field(hasProfile, profileSO, minDistance, "MinDistance", "overrideMinDistance", "Min Distance");
+                Hint("잔상 간 최소 간격. 예: 0.01=거의 연속, 0.1=적당한 간격, 0.5=듬성듬성");
+            }
 
             // ── Material ──
             Section("Material");
@@ -239,6 +230,35 @@ namespace TelleR
             }
 
             serializedObject.ApplyModifiedProperties();
+        }
+
+        // ─────────────────────────────────────────────
+        //  Helpers
+        // ─────────────────────────────────────────────
+
+        T ResolveEnum<T>(bool hasProfile, SerializedObject profileSO,
+            SerializedProperty localProp, string profileField, string overrideFlag) where T : System.Enum
+        {
+            if (hasProfile && profileSO != null)
+            {
+                var ovProp = serializedObject.FindProperty(overrideFlag);
+                bool useLocal = ovProp != null && ovProp.boolValue;
+                if (!useLocal)
+                    return (T)(object)profileSO.FindProperty(profileField).intValue;
+            }
+            return (T)(object)localProp.intValue;
+        }
+
+        float ResolveFloat(bool hasProfile, SerializedObject profileSO,
+            SerializedProperty localProp, string profileField, string overrideFlag)
+        {
+            if (hasProfile && profileSO != null)
+            {
+                var ovProp = serializedObject.FindProperty(overrideFlag);
+                if (ovProp != null && !ovProp.boolValue)
+                    return profileSO.FindProperty(profileField).floatValue;
+            }
+            return localProp.floatValue;
         }
 
         void Section(string title)
@@ -313,6 +333,10 @@ namespace TelleR
             EditorGUIUtility.labelWidth = savedLabelWidth;
         }
 
+        // ─────────────────────────────────────────────
+        //  Asset Creation
+        // ─────────────────────────────────────────────
+
         void CreateProfile(TrailEffect fx)
         {
             string path = EditorUtility.SaveFilePanelInProject(
@@ -330,7 +354,8 @@ namespace TelleR
             p.FresnelPower = fx.FresnelPower;
             p.FresnelIntensity = fx.FresnelIntensity;
             p.StampTexture = fx.StampTexture;
-            p.StampSize = fx.StampSize;
+            p.StampSizeStart = fx.StampSizeStart;
+            p.StampSizeEnd = fx.StampSizeEnd;
             p.StampStyle = fx.StampStyle;
             p.StampCount = fx.StampCount;
             p.StampFollowSpeed = fx.StampFollowSpeed;

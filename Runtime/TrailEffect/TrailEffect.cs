@@ -34,7 +34,8 @@ namespace TelleR
         [Range(0f, 5f)] public float FresnelPower = 3f;
         [Range(0f, 2f)] public float FresnelIntensity = 0f;
         public Texture2D StampTexture;
-        [Range(0.1f, 10f)] public float StampSize = 1f;
+        [Range(0.1f, 10f)] public float StampSizeStart = 1f;
+        [Range(0.1f, 10f)] public float StampSizeEnd = 1f;
         public StampStyle StampStyle = StampStyle.Follow;
         [Range(1, 10)] public int StampCount = 4;
         [Range(1f, 30f)] public float StampFollowSpeed = 8f;
@@ -56,7 +57,8 @@ namespace TelleR
         [HideInInspector] public bool overrideFresnelPower;
         [HideInInspector] public bool overrideFresnelIntensity;
         [HideInInspector] public bool overrideStampTexture;
-        [HideInInspector] public bool overrideStampSize;
+        [HideInInspector] public bool overrideStampSizeStart;
+        [HideInInspector] public bool overrideStampSizeEnd;
         [HideInInspector] public bool overrideStampStyle;
         [HideInInspector] public bool overrideStampCount;
         [HideInInspector] public bool overrideStampFollowSpeed;
@@ -164,7 +166,8 @@ namespace TelleR
         float EffFresnelPower => UseLocal(overrideFresnelPower) ? FresnelPower : Profile.FresnelPower;
         float EffFresnelIntensity => UseLocal(overrideFresnelIntensity) ? FresnelIntensity : Profile.FresnelIntensity;
         Texture2D EffStampTex => UseLocal(overrideStampTexture) ? StampTexture : Profile.StampTexture;
-        float EffStampSize => UseLocal(overrideStampSize) ? StampSize : Profile.StampSize;
+        float EffStampSizeStart => UseLocal(overrideStampSizeStart) ? StampSizeStart : Profile.StampSizeStart;
+        float EffStampSizeEnd => UseLocal(overrideStampSizeEnd) ? StampSizeEnd : Profile.StampSizeEnd;
         StampStyle EffStampStyle => UseLocal(overrideStampStyle) ? StampStyle : Profile.StampStyle;
         int EffStampCount => UseLocal(overrideStampCount) ? StampCount : Profile.StampCount;
         float EffStampFollowSpeed => UseLocal(overrideStampFollowSpeed) ? StampFollowSpeed : Profile.StampFollowSpeed;
@@ -255,10 +258,8 @@ namespace TelleR
                 stampChainInitialized = true;
             }
 
-            // 첫 번째 스탬프: 드론을 부드럽게 추적
             stampPositions[0] = Vector3.Lerp(stampPositions[0], targetPos, dt * speed);
 
-            // 나머지: 앞 스탬프를 체인처럼 따라감
             for (int i = 1; i < count; i++)
             {
                 Vector3 leader = stampPositions[i - 1];
@@ -278,7 +279,8 @@ namespace TelleR
             if (runtimeMaterial == null || stampQuadMesh == null) return;
 
             int count = EffStampCount;
-            float stampSize = EffStampSize;
+            float sizeStart = EffStampSizeStart;
+            float sizeEnd = EffStampSizeEnd;
             Color baseColor = EffColor;
             Gradient gradient = EffGradient;
             bool useGradient = gradient != null && gradient.colorKeys != null && gradient.colorKeys.Length > 1;
@@ -295,6 +297,7 @@ namespace TelleR
                 if (distToTarget < EffStampSpacing * 0.5f) continue;
 
                 float t = (float)i / Mathf.Max(1, count - 1);
+                float size = Mathf.Lerp(sizeStart, sizeEnd, t);
 
                 Color color;
                 float alpha;
@@ -309,7 +312,7 @@ namespace TelleR
                     alpha = baseColor.a;
                 }
 
-                instMatrices[sortCount] = Matrix4x4.TRS(stampPositions[i], camRot, Vector3.one * stampSize);
+                instMatrices[sortCount] = Matrix4x4.TRS(stampPositions[i], camRot, Vector3.one * size);
                 instanceDataCpu[sortCount].color = new Vector4(color.r, color.g, color.b, color.a);
                 instanceDataCpu[sortCount].alpha = alpha;
                 instanceDataCpu[sortCount].fresnelPower = 0f;
@@ -525,7 +528,7 @@ namespace TelleR
             float minDist = EffMinDist;
             if (distSq < minDist * minDist && lastSnapshotTime > 0f) return;
 
-            int max = EffMaxSnap;
+            int max = snapshots.Length;
             int idx = snapshotHead;
 
             snapshots[idx].Matrix = resolvedFilter.transform.localToWorldMatrix;
@@ -601,15 +604,24 @@ namespace TelleR
             float invDuration = 1f / duration;
             Gradient gradient = EffGradient;
             Color baseColor = EffColor;
-            float fresnelP = EffFresnelPower;
-            float fresnelI = EffFresnelIntensity;
-            float scaleS = EffScaleStart;
-            float scaleE = EffScaleEnd;
-            bool useScale = !Mathf.Approximately(scaleS, 1f) || !Mathf.Approximately(scaleE, 1f);
+            float fresnelP = isStamp ? 0f : EffFresnelPower;
+            float fresnelI = isStamp ? 0f : EffFresnelIntensity;
             int max = snapshots.Length;
             int layer = gameObject.layer;
             bool useGradient = gradient != null && gradient.colorKeys != null && gradient.colorKeys.Length > 1;
-            float stampSize = isStamp ? EffStampSize : 1f;
+
+            float scaleS, scaleE;
+            if (isStamp)
+            {
+                scaleS = EffStampSizeStart;
+                scaleE = EffStampSizeEnd;
+            }
+            else
+            {
+                scaleS = EffScaleStart;
+                scaleE = EffScaleEnd;
+            }
+            bool useScale = !Mathf.Approximately(scaleS, scaleE) || (isStamp && !Mathf.Approximately(scaleS, 1f));
 
             Camera cam = GetRenderCamera();
             Vector3 camPos = cam != null ? cam.transform.position : transform.position;
@@ -665,9 +677,7 @@ namespace TelleR
 
                 if (isStamp)
                 {
-                    float s = stampSize;
-                    if (useScale)
-                        s *= Mathf.Lerp(scaleS, scaleE, t);
+                    float s = Mathf.Lerp(scaleS, scaleE, t);
                     mat = Matrix4x4.TRS(snapshots[idx].Position, camRot, Vector3.one * s);
                 }
                 else
