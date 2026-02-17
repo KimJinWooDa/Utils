@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEditor;
@@ -8,7 +9,7 @@ namespace TelleR
     [CanEditMultipleObjects]
     public class TrailEffectEditor : Editor
     {
-        SerializedProperty profile, mode;
+        SerializedProperty profile, mode, colorMode;
         SerializedProperty trailColor, colorOverLifetime, duration, snapshotsPerSecond;
         SerializedProperty scaleStart, scaleEnd;
         SerializedProperty fresnelPower, fresnelIntensity;
@@ -17,10 +18,16 @@ namespace TelleR
         SerializedProperty maxSnapshots, minDistance;
         SerializedProperty trailMaterial;
 
+        Dictionary<string, SerializedProperty> overrideCache;
+        SerializedObject cachedProfileSO;
+        TrailEffectProfile cachedProfileRef;
+        static GUIStyle cachedHintStyle;
+
         void OnEnable()
         {
             profile = serializedObject.FindProperty("Profile");
             mode = serializedObject.FindProperty("Mode");
+            colorMode = serializedObject.FindProperty("ColorMode");
             trailColor = serializedObject.FindProperty("TrailColor");
             colorOverLifetime = serializedObject.FindProperty("ColorOverLifetime");
             duration = serializedObject.FindProperty("Duration");
@@ -40,6 +47,33 @@ namespace TelleR
             maxSnapshots = serializedObject.FindProperty("MaxSnapshots");
             minDistance = serializedObject.FindProperty("MinDistance");
             trailMaterial = serializedObject.FindProperty("trailMaterial");
+
+            overrideCache = new Dictionary<string, SerializedProperty>();
+            string[] flags =
+            {
+                "overrideMode", "overrideColorMode", "overrideTrailColor", "overrideColorOverLifetime",
+                "overrideDuration", "overrideSnapshotsPerSecond", "overrideScaleStart", "overrideScaleEnd",
+                "overrideFresnelPower", "overrideFresnelIntensity", "overrideStampTexture",
+                "overrideStampSizeStart", "overrideStampSizeEnd", "overrideStampStyle",
+                "overrideStampCount", "overrideStampFollowSpeed", "overrideStampSpacing",
+                "overridePreventOverlap", "overrideMaxSnapshots", "overrideMinDistance"
+            };
+            foreach (var f in flags)
+                overrideCache[f] = serializedObject.FindProperty(f);
+        }
+
+        SerializedObject GetProfileSO()
+        {
+            var profileRef = (TrailEffectProfile)profile.objectReferenceValue;
+            if (profileRef == null) return null;
+
+            if (cachedProfileRef != profileRef || cachedProfileSO == null)
+            {
+                cachedProfileSO = new SerializedObject(profileRef);
+                cachedProfileRef = profileRef;
+            }
+            cachedProfileSO.Update();
+            return cachedProfileSO;
         }
 
         public override void OnInspectorGUI()
@@ -47,7 +81,6 @@ namespace TelleR
             serializedObject.Update();
             var fx = (TrailEffect)target;
 
-            // ── Profile ──
             Section("Profile");
             EditorGUILayout.BeginHorizontal();
             EditorGUILayout.PropertyField(profile, GUIContent.none);
@@ -57,16 +90,11 @@ namespace TelleR
             Hint("여러 드론에 같은 트레일을 적용할 때 Profile 하나로 공유 가능");
 
             bool hasProfile = profile.objectReferenceValue != null;
-            SerializedObject profileSO = null;
+            SerializedObject profileSO = GetProfileSO();
 
             if (hasProfile)
-            {
-                profileSO = new SerializedObject((TrailEffectProfile)profile.objectReferenceValue);
-                profileSO.Update();
                 EditorGUILayout.HelpBox("\u2611 Check = use local value  |  Uncheck = use Profile value", MessageType.Info);
-            }
 
-            // ── Mode ──
             Section("Mode");
             Field(hasProfile, profileSO, mode, "Mode", "overrideMode", "Mode");
             Hint("Color=드론 메쉬 잔상, TextureStamp=텍스쳐 빌보드 (Follow/Trail 스타일)");
@@ -83,15 +111,23 @@ namespace TelleR
             bool isStampTrail = isStamp && currentStyle == StampStyle.Trail;
             bool usesSnapshots = isColor || isStampTrail;
 
-            // ── Appearance (공통) ──
             Section("Appearance");
-            Field(hasProfile, profileSO, trailColor, "TrailColor", "overrideTrailColor", "Trail Color");
-            Hint("Gradient 미사용 시 기본색. 예: 빨강=(1,0,0,0.6), alpha로 기본 투명도 조절");
+            Field(hasProfile, profileSO, colorMode, "ColorMode", "overrideColorMode", "Color Mode");
+            Hint("SolidColor=단색, Gradient=시간에 따라 색/투명도 변화");
 
-            Field(hasProfile, profileSO, colorOverLifetime, "ColorOverLifetime", "overrideColorOverLifetime", "Color Over Lifetime");
-            Hint("시간에 따라 색/투명도 변화. 예: 시안->파랑 페이드아웃. 키 2개 이상이면 TrailColor 대신 사용");
+            TrailColorMode currentColorMode = ResolveEnum<TrailColorMode>(hasProfile, profileSO, colorMode, "ColorMode", "overrideColorMode");
 
-            // Color 전용: Scale (메쉬 배율)
+            if (currentColorMode == TrailColorMode.SolidColor)
+            {
+                Field(hasProfile, profileSO, trailColor, "TrailColor", "overrideTrailColor", "Trail Color");
+                Hint("기본색. 예: 빨강=(1,0,0,0.6), alpha로 기본 투명도 조절");
+            }
+            else
+            {
+                Field(hasProfile, profileSO, colorOverLifetime, "ColorOverLifetime", "overrideColorOverLifetime", "Color Over Lifetime");
+                Hint("시간에 따라 색/투명도 변화. 예: 시안->파랑 페이드아웃");
+            }
+
             if (isColor)
             {
                 Field(hasProfile, profileSO, scaleStart, "ScaleStart", "overrideScaleStart", "Scale Start");
@@ -101,7 +137,6 @@ namespace TelleR
                 Hint("잔상 끝 배율. 예: 0.5=줄어들며 소멸, 1.5=커지며 소멸");
             }
 
-            // ── Fresnel (Color 전용) ──
             if (isColor)
             {
                 Section("Fresnel");
@@ -116,7 +151,6 @@ namespace TelleR
                 }
             }
 
-            // ── Texture Stamp (TextureStamp 전용) ──
             if (isStamp)
             {
                 Section("Texture Stamp");
@@ -145,21 +179,15 @@ namespace TelleR
                 }
             }
 
-            // ── Snapshot (Color, TextureStamp+Trail만) ──
             if (usesSnapshots)
             {
-                Section("Snapshot");
+                Section("Performance");
                 Field(hasProfile, profileSO, duration, "Duration", "overrideDuration", "Duration");
                 Hint("잔상 수명. 예: 0.3=짧고 빠른 잔상, 1.0=긴 꼬리, 2.0=느린 페이드");
 
                 Field(hasProfile, profileSO, snapshotsPerSecond, "SnapshotsPerSecond", "overrideSnapshotsPerSecond", "Snapshots/Sec");
                 Hint("초당 잔상 수. 예: 10=가벼운 효과, 30=부드러운 트레일, 60=매우 촘촘 (성능 주의)");
-            }
 
-            // ── Performance (스냅샷 사용 모드만) ──
-            if (usesSnapshots)
-            {
-                Section("Performance");
                 Field(hasProfile, profileSO, preventOverlap, "PreventOverlap", "overridePreventOverlap", "Prevent Overlap");
                 Hint("켜면 잔상끼리 겹쳐도 뭉쳐 보이지 않음. 끄면 겹치는 부분이 더 불투명해짐");
 
@@ -170,7 +198,6 @@ namespace TelleR
                 Hint("잔상 간 최소 간격. 예: 0.01=거의 연속, 0.1=적당한 간격, 0.5=듬성듬성");
             }
 
-            // ── Material ──
             Section("Material");
             EditorGUILayout.PropertyField(trailMaterial, new GUIContent("Trail Material"));
             Hint("TelleR/Trail 셰이더 Material 에셋. GPU Instancing 필수. 없으면 Create Material 클릭");
@@ -181,7 +208,6 @@ namespace TelleR
                     CreateTrailMaterial(fx);
             }
 
-            // ── Runtime ──
             if (Application.isPlaying)
             {
                 Section("Runtime");
@@ -193,7 +219,6 @@ namespace TelleR
                 EditorGUILayout.EndHorizontal();
             }
 
-            // ── Debug Motion ──
             Section("Debug Motion");
             if (!Application.isPlaying)
                 EditorGUILayout.HelpBox("Play Mode에서 실행하면 실시간 트레일을 확인할 수 있습니다.", MessageType.Info);
@@ -218,7 +243,7 @@ namespace TelleR
                 EditorGUILayout.BeginHorizontal();
                 foreach (DebugMotionPattern pattern in System.Enum.GetValues(typeof(DebugMotionPattern)))
                 {
-                    if (GUILayout.Button("\u25b6 " + pattern.ToString()))
+                    if (GUILayout.Button("\u25b6 " + pattern))
                     {
                         var osc = fx.gameObject.AddComponent<TrailDebugOscillator>();
                         osc.Pattern = pattern;
@@ -232,18 +257,13 @@ namespace TelleR
             serializedObject.ApplyModifiedProperties();
         }
 
-        // ─────────────────────────────────────────────
-        //  Helpers
-        // ─────────────────────────────────────────────
-
         T ResolveEnum<T>(bool hasProfile, SerializedObject profileSO,
             SerializedProperty localProp, string profileField, string overrideFlag) where T : System.Enum
         {
             if (hasProfile && profileSO != null)
             {
-                var ovProp = serializedObject.FindProperty(overrideFlag);
-                bool useLocal = ovProp != null && ovProp.boolValue;
-                if (!useLocal)
+                overrideCache.TryGetValue(overrideFlag, out var ovProp);
+                if (ovProp != null && !ovProp.boolValue)
                     return (T)(object)profileSO.FindProperty(profileField).intValue;
             }
             return (T)(object)localProp.intValue;
@@ -254,7 +274,7 @@ namespace TelleR
         {
             if (hasProfile && profileSO != null)
             {
-                var ovProp = serializedObject.FindProperty(overrideFlag);
+                overrideCache.TryGetValue(overrideFlag, out var ovProp);
                 if (ovProp != null && !ovProp.boolValue)
                     return profileSO.FindProperty(profileField).floatValue;
             }
@@ -272,13 +292,16 @@ namespace TelleR
 
         static void Hint(string text)
         {
-            var style = new GUIStyle(EditorStyles.label)
+            if (cachedHintStyle == null)
             {
-                normal = { textColor = new Color(0.65f, 0.65f, 0.65f) },
-                fontSize = 11,
-                padding = new RectOffset(18, 0, 0, 4)
-            };
-            EditorGUILayout.LabelField("\u3134 " + text, style);
+                cachedHintStyle = new GUIStyle(EditorStyles.label)
+                {
+                    normal = { textColor = new Color(0.65f, 0.65f, 0.65f) },
+                    fontSize = 11,
+                    padding = new RectOffset(18, 0, 0, 4)
+                };
+            }
+            EditorGUILayout.LabelField("\u3134 " + text, cachedHintStyle);
         }
 
         void Field(bool hasProfile, SerializedObject profileSO,
@@ -292,7 +315,7 @@ namespace TelleR
                 return;
             }
 
-            var ovProp = serializedObject.FindProperty(overrideFlag);
+            overrideCache.TryGetValue(overrideFlag, out var ovProp);
             bool ov = ovProp != null && ovProp.boolValue;
 
             SerializedProperty displayProp = ov ? localProp : (profileSO.FindProperty(profileField) ?? localProp);
@@ -333,18 +356,14 @@ namespace TelleR
             EditorGUIUtility.labelWidth = savedLabelWidth;
         }
 
-        // ─────────────────────────────────────────────
-        //  Asset Creation
-        // ─────────────────────────────────────────────
-
         void CreateProfile(TrailEffect fx)
         {
-            string path = EditorUtility.SaveFilePanelInProject(
-                "Save Trail Profile", "TrailProfile", "asset", "Save location");
+            string path = EditorUtility.SaveFilePanelInProject("Save Trail Profile", "TrailProfile", "asset", "Save location");
             if (string.IsNullOrEmpty(path)) return;
 
             var p = CreateInstance<TrailEffectProfile>();
             p.Mode = fx.Mode;
+            p.ColorMode = fx.ColorMode;
             p.TrailColor = fx.TrailColor;
             p.ColorOverLifetime = fx.ColorOverLifetime;
             p.Duration = fx.Duration;
@@ -379,8 +398,7 @@ namespace TelleR
                 return;
             }
 
-            string path = EditorUtility.SaveFilePanelInProject(
-                "Save Trail Material", "TrailFX", "mat", "Save location");
+            string path = EditorUtility.SaveFilePanelInProject("Save Trail Material", "TrailFX", "mat", "Save location");
             if (string.IsNullOrEmpty(path)) return;
 
             var mat = new Material(shader)

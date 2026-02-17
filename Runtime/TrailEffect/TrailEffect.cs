@@ -15,7 +15,8 @@ namespace TelleR
         public TrailEffectProfile Profile;
         public bool Active = true;
         public TrailMode Mode = TrailMode.Color;
-
+        public TrailColorMode ColorMode = TrailColorMode.SolidColor;
+        
         [HideInInspector]
         public MeshFilter TargetMeshFilter;
 
@@ -48,6 +49,7 @@ namespace TelleR
         //  Per-field override flags (managed by editor)
         // ─────────────────────────────────────────────
         [HideInInspector] public bool overrideMode;
+        [HideInInspector] public bool overrideColorMode;
         [HideInInspector] public bool overrideTrailColor;
         [HideInInspector] public bool overrideColorOverLifetime;
         [HideInInspector] public bool overrideDuration;
@@ -157,6 +159,7 @@ namespace TelleR
         // ─────────────────────────────────────────────
 
         TrailMode EffMode => UseLocal(overrideMode) ? Mode : Profile.Mode;
+        TrailColorMode EffColorMode => UseLocal(overrideColorMode) ? ColorMode : Profile.ColorMode;
         Color EffColor => UseLocal(overrideTrailColor) ? TrailColor : Profile.TrailColor;
         Gradient EffGradient => UseLocal(overrideColorOverLifetime) ? ColorOverLifetime : Profile.ColorOverLifetime;
         float EffDuration => UseLocal(overrideDuration) ? Duration : Profile.Duration;
@@ -283,7 +286,7 @@ namespace TelleR
             float sizeEnd = EffStampSizeEnd;
             Color baseColor = EffColor;
             Gradient gradient = EffGradient;
-            bool useGradient = gradient != null && gradient.colorKeys != null && gradient.colorKeys.Length > 1;
+            bool useGradient = EffColorMode == TrailColorMode.Gradient;
             int layer = gameObject.layer;
 
             Camera cam = GetRenderCamera();
@@ -608,7 +611,7 @@ namespace TelleR
             float fresnelI = isStamp ? 0f : EffFresnelIntensity;
             int max = snapshots.Length;
             int layer = gameObject.layer;
-            bool useGradient = gradient != null && gradient.colorKeys != null && gradient.colorKeys.Length > 1;
+            bool useGradient = EffColorMode == TrailColorMode.Gradient;
 
             float scaleS, scaleE;
             if (isStamp)

@@ -13,11 +13,18 @@ namespace TelleR
         Follow = 0,
         Trail = 1
     }
-
+    
+    public enum TrailColorMode
+    {
+        SolidColor = 0,
+        Gradient = 1
+    }
+    
     [CreateAssetMenu(fileName = "TrailProfile", menuName = "TelleR/Trail Profile")]
     public class TrailEffectProfile : ScriptableObject
     {
         public TrailMode Mode = TrailMode.Color;
+        public TrailColorMode ColorMode = TrailColorMode.SolidColor;
         public Color TrailColor = new Color(0f, 0.5f, 1f, 0.6f);
         public Gradient ColorOverLifetime;
         [Range(0.05f, 5f)] public float Duration = 0.5f;
