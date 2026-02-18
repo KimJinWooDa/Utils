@@ -34,34 +34,34 @@ https://github.com/KimJinWooDa/Utils.git
 | 기능 | 설명 | 사용 방법 |
 |------|------|-----------|
 | ◈ **Mesh Pivot Tool** | 메쉬 피벗 위치 수정, 프리셋/버텍스 스냅 | `MeshFilter 우클릭 → Edit Mesh Pivot` |
-| 📄 **MeshFilter FBX Generator** | MeshFilter/SkinnedMesh의 FBX 백업 생성 (리임포트 손실 방지) | MeshFilter Inspector 자동 표시 |
-| 🦴 **Skinned Mesh Collider** | SkinnedMeshRenderer → MeshCollider 변환 (메쉬 간소화 지원) | `Tools → TelleR → Tool → Skinned Mesh Collider Creator` |
+| 📄 **MeshFilter FBX Generator** | MeshFilter/SkinnedMesh의 FBX 백업 생성 | MeshFilter Inspector 자동 표시 |
+| 🦴 **Skinned Mesh Collider** | SkinnedMeshRenderer → MeshCollider 변환 | `Tools → TelleR → Tool → Skinned Mesh Collider Creator` |
 
 ### 🔊 오디오 도구
 
 | 기능 | 설명 | 사용 방법 |
 |------|------|-----------|
-| 🔊 **Audio Volume 3D** | 3D 사운드 볼륨 영역 시각화, Fade/Occlusion 설정 | `Add Component → Audio Volume 3D` |
+| 🔊 **Audio Volume 3D** | 3D 사운드 볼륨 영역 시각화 | `Add Component → Audio Volume 3D` |
 
 ### 🎬 애니메이션 & 이펙트 도구
 
 | 기능 | 설명 | 사용 방법 |
 |------|------|-----------|
 | 🎬 **Animation Inspector Controller** | 에디터 애니메이션 미리보기, 프레임 이벤트/트랜지션 | `Add Component → Animation Inspector Controller` |
-| ✨ **Trail Effect** | GPU Instancing 기반 커스텀 트레일 이펙트 (프로파일/셰이더) | `Add Component → Trail Effect` |
+| ✨ **Trail Effect** | GPU Instancing 기반 커스텀 트레일 이펙트 | `Add Component → Trail Effect` |
 
 ### 🖼️ 스프라이트 & UI 도구
 
 | 기능 | 설명 | 사용 방법 |
 |------|------|-----------|
-| ✂️ **Auto Sprite Slicer** | 이미지를 Single Sprite로 일괄 변환 (드래그앤드롭) | `Tools → TelleR → Tool → Auto Sprite Slicer` |
-| 🗂️ **UI Sprite Atlas Builder** | 드래그앤드롭으로 SpriteAtlas 빌드/업데이트 | `Tools → TelleR → Tool → AtlasBuilder` |
+| ✂️ **Auto Sprite Slicer** | 이미지를 Single Sprite로 일괄 변환 | `Tools → TelleR → Tool → Auto Sprite Slicer` |
+| 🗂️ **UI Sprite Atlas Builder** | SpriteAtlas 빌드/업데이트 | `Tools → TelleR → Tool → AtlasBuilder` |
 
 ### 🛠️ 프로젝트 관리 도구
 
 | 기능 | 설명 | 사용 방법 |
 |------|------|-----------|
-| 🚀 **Fast Clone** | 멀티플레이어 테스트용 프로젝트 복제 (심볼릭 링크) | `Tools → TelleR → Tool → Clones Manager` |
+| 🚀 **Fast Clone** | 멀티플레이어 테스트용 프로젝트 복제 | `Tools → TelleR → Tool → Clones Manager` |
 | 📦 **UPM Package Creator** | UPM 패키지 생성, package.json/asmdef 자동 생성 | `Tools → TelleR → Tool → UPM Package Creator` |
 
 ---
