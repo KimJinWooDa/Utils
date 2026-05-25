@@ -23,6 +23,7 @@ namespace TelleR
         private Color _keyColor2 = new Color(0.8f, 0.8f, 0.8f, 1f);
         private float _colorTolerance = 0.08f;
         private int _jpgQuality = 95;
+        private bool _showAdvanced = false;
 
         private string _previewPath;
         private Texture2D _previewSource;
@@ -35,23 +36,23 @@ namespace TelleR
         private static void Open()
         {
             var win = GetWindow<AutoSpriteSlicerWindow>(false, "Auto Sprite Slicer");
-            win.minSize = new Vector2(460, 660);
+            win.minSize = new Vector2(420, 480);
         }
 
         private void OnDisable() => ClearPreview();
 
         private void OnGUI()
         {
-            EditorGUILayout.LabelField("Auto Sprite Slicer + Border Trim/Remove", EditorStyles.boldLabel);
-            EditorGUILayout.HelpBox("PNG/JPG/TGA/EXR: 배경 컬러 자동 제거 → 가장자리 트림(원본 덮어쓰기) → Sprite(Single) 임포트.\nBMP/PSD/GIF/HDR/TIF: 임포터 설정만 적용 (재인코딩 불가).", MessageType.Info);
+            EditorGUILayout.LabelField("Auto Sprite Slicer", EditorStyles.boldLabel);
+            EditorGUILayout.HelpBox("이미지를 드래그하면 배경 자동 제거 + 트림 + Sprite(Single) 임포트까지 자동 처리합니다.", MessageType.None);
 
-            DrawTrimSettings();
-            EditorGUILayout.Space(6f);
             DrawDropAndList();
             EditorGUILayout.Space(6f);
             DrawPreview();
             EditorGUILayout.Space(6f);
             DrawActions();
+            EditorGUILayout.Space(4f);
+            DrawAdvanced();
 
             if (!string.IsNullOrEmpty(_lastReport))
             {
@@ -60,22 +61,34 @@ namespace TelleR
             }
         }
 
-        private void DrawTrimSettings()
+        private void DrawAdvanced()
         {
-            EditorGUILayout.LabelField("Trim / Background Removal", EditorStyles.boldLabel);
+            _showAdvanced = EditorGUILayout.Foldout(_showAdvanced, "Advanced", true);
+            if (!_showAdvanced) return;
             using (new EditorGUI.IndentLevelScope())
             {
                 EditorGUI.BeginChangeCheck();
                 _alphaThreshold = EditorGUILayout.IntSlider(new GUIContent("Alpha Threshold", "이 값 이상의 알파를 '불투명'으로 간주"), _alphaThreshold, 0, 255);
                 _padding = EditorGUILayout.IntSlider(new GUIContent("Padding (px)", "잘라낸 영역 주위에 추가 여백"), _padding, 0, 64);
-                _autoDetectKeys = EditorGUILayout.Toggle(new GUIContent("Auto Detect Key Colors From Corners", "네 모서리 픽셀 색을 키 색상으로 자동 사용"), _autoDetectKeys);
+                _autoDetectKeys = EditorGUILayout.Toggle(new GUIContent("Auto Detect Key Colors", "네 모서리 픽셀 색을 배경 키로 사용"), _autoDetectKeys);
                 using (new EditorGUI.DisabledScope(_autoDetectKeys))
                 {
                     _keyColor1 = EditorGUILayout.ColorField(new GUIContent("Key Color 1"), _keyColor1);
                     _keyColor2 = EditorGUILayout.ColorField(new GUIContent("Key Color 2"), _keyColor2);
                 }
                 _colorTolerance = EditorGUILayout.Slider(new GUIContent("Color Tolerance", "키 색상과의 허용 색차 (0~1)"), _colorTolerance, 0f, 0.5f);
-                _jpgQuality = EditorGUILayout.IntSlider(new GUIContent("JPG Quality", "JPG 재인코딩 품질"), _jpgQuality, 50, 100);
+                _jpgQuality = EditorGUILayout.IntSlider(new GUIContent("JPG Quality"), _jpgQuality, 50, 100);
+                if (GUILayout.Button("Reset Defaults"))
+                {
+                    _alphaThreshold = 1;
+                    _padding = 0;
+                    _autoDetectKeys = true;
+                    _keyColor1 = Color.white;
+                    _keyColor2 = new Color(0.8f, 0.8f, 0.8f, 1f);
+                    _colorTolerance = 0.08f;
+                    _jpgQuality = 95;
+                    BuildPreview();
+                }
                 if (EditorGUI.EndChangeCheck()) BuildPreview();
             }
         }
