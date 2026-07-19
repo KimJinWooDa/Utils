@@ -3,6 +3,7 @@
   "version": "1.0.25",
   "displayName": "TelleR Utilities",
   "description": "Unity editor utilities by TelleR - Fast Clone, and more",
+  "documentationUrl": "https://github.com/KimJinWooDa/Utils#readme",
   "unity": "2021.3",
   "author": {
     "name": "TelleR"

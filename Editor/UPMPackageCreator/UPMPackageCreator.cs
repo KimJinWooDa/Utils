@@ -2257,8 +2257,20 @@ namespace TelleR
                 unity = unityVersionField.value,
                 author = new Author { name = authorField.value },
             };
-            string json = JsonUtility.ToJson(pkg, true);
             string path = Path.Combine(currentPackagePath, "package.json");
+
+            // UI에 없는 필드(documentationUrl 등)는 기존 파일 값을 보존
+            try
+            {
+                if (File.Exists(path))
+                {
+                    var old = JsonUtility.FromJson<PackageJson>(SafeReadAllText(path));
+                    if (old != null) pkg.documentationUrl = old.documentationUrl;
+                }
+            }
+            catch { }
+
+            string json = JsonUtility.ToJson(pkg, true);
             File.WriteAllText(path, json);
 
             if (!File.Exists(path + ".meta")) CreateFileMeta(path);
@@ -2551,6 +2563,7 @@ namespace TelleR
             public string version;
             public string displayName;
             public string description;
+            public string documentationUrl;
             public string unity;
             public Author author;
             public string[] keywords = new string[0];
