@@ -26,7 +26,11 @@ namespace TelleR
 
         private void OnGUI()
         {
-            EditorGUILayout.LabelField("Drag & Drop Images / Sprites / Textures / GameObjects here");
+            EditorGUILayout.HelpBox(
+                "캔버스(또는 UI 프리팹)를 통째로 드래그하면 하위 Image가 쓰는 스프라이트를 모아 SpriteAtlas로 묶어 드로우콜을 줄입니다.\n" +
+                "1) Drop Area에 Canvas / 스프라이트 / 텍스처 드래그   2) Atlas Asset Path 확인   3) Build / Update Atlas\n" +
+                "※ 텍스처는 Sprite 타입으로 임포트돼 있어야 수집됩니다. Entries 목록은 컴파일·플레이 진입 시 초기화됩니다.",
+                MessageType.Info);
             Rect dropRect = GUILayoutUtility.GetRect(0f, 70f, GUILayout.ExpandWidth(true));
             GUI.Box(dropRect, "Drop Area", EditorStyles.helpBox);
             HandleDrop(dropRect);
@@ -115,14 +119,21 @@ namespace TelleR
         {
             string path = (atlasAssetPath ?? string.Empty).Replace('\\', '/');
             if (string.IsNullOrWhiteSpace(path))
+            {
+                EditorUtility.DisplayDialog("UI Atlas Builder", "Atlas Asset Path를 입력해 주세요.\n예: Assets/UI/UIAtlas.spriteatlas", "OK");
                 return;
+            }
 
             if (!path.EndsWith(".spriteatlas"))
                 path += ".spriteatlas";
 
             string dir = Path.GetDirectoryName(path);
             if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
+            {
                 Directory.CreateDirectory(dir);
+                // 새 폴더를 AssetDatabase가 인식하기 전에 CreateAsset하면 실패하므로 먼저 Refresh
+                AssetDatabase.Refresh();
+            }
 
             SpriteAtlas atlas = AssetDatabase.LoadAssetAtPath<SpriteAtlas>(path);
             bool isNew = atlas == null;
@@ -154,20 +165,23 @@ namespace TelleR
             if (packables.Length > 0)
                 SpriteAtlasExtensions.Add(atlas, packables);
 
-            SpriteAtlasPackingSettings packing = atlas.GetPackingSettings();
-            packing.enableRotation = false;
-            packing.enableTightPacking = false;
-            packing.padding = 2;
-            atlas.SetPackingSettings(packing);
-
-            SpriteAtlasTextureSettings texture = atlas.GetTextureSettings();
-            texture.generateMipMaps = false;
-            atlas.SetTextureSettings(texture);
-
-            SpriteAtlasExtensions.SetIncludeInBuild(atlas, true);
-
+            // 기본 설정은 새 아틀라스에만 적용 — 기존 아틀라스의 수동 튜닝(패딩·회전 등)을 리셋하지 않음
             if (isNew)
+            {
+                SpriteAtlasPackingSettings packing = atlas.GetPackingSettings();
+                packing.enableRotation = false;
+                packing.enableTightPacking = false;
+                packing.padding = 2;
+                atlas.SetPackingSettings(packing);
+
+                SpriteAtlasTextureSettings texture = atlas.GetTextureSettings();
+                texture.generateMipMaps = false;
+                atlas.SetTextureSettings(texture);
+
+                SpriteAtlasExtensions.SetIncludeInBuild(atlas, true);
+
                 AssetDatabase.CreateAsset(atlas, path);
+            }
 
             EditorUtility.SetDirty(atlas);
             AssetDatabase.SaveAssets();
@@ -175,6 +189,9 @@ namespace TelleR
 
             if (packAfterBuild)
                 SpriteAtlasUtility.PackAtlases(new[] { atlas }, EditorUserBuildSettings.activeBuildTarget);
+
+            EditorUtility.DisplayDialog("UI Atlas Builder",
+                $"'{Path.GetFileName(path)}' {(isNew ? "생성" : "업데이트")} 완료\n등록된 스프라이트: {packables.Length}개", "OK");
         }
 
         private static HashSet<Sprite> CollectSpritesFromEntries(List<Object> list)
