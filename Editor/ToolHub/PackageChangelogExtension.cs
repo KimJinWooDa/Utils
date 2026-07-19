@@ -8,15 +8,20 @@ using PackageInfo = UnityEditor.PackageManager.PackageInfo;
 
 namespace TelleR
 {
-    // Package Manager에서 이 패키지를 선택하면 상세 화면 하단에 CHANGELOG.md 내용을 직접 표시한다.
-    // (기본 Package Manager는 changelogUrl 링크만 지원하고 본문은 보여주지 않음)
+    // Package Manager에서 이 패키지를 선택하면 Version History 탭 안(버전 목록 아래)에
+    // CHANGELOG.md 내용을 직접 표시한다. 기본 확장 슬롯은 탭 위쪽이라 보기 흉하므로
+    // 내부 요소 "versionsTab"(Unity 6000.3 기준)으로 이동시키고, 못 찾으면 접힌 Foldout으로 폴백한다.
     [InitializeOnLoad]
     internal class PackageChangelogExtension : IPackageManagerExtension
     {
         private const string PackageName = "com.teller.util";
+        private const string VersionsTabElementName = "versionsTab";
 
-        private VisualElement root;
+        private VisualElement placeholder;   // Unity가 배치하는 기본 슬롯 — 폴백일 때만 표시
+        private VisualElement contentRoot;   // 실제 체인지로그 패널
         private ScrollView scrollView;
+        private Foldout fallbackFoldout;
+        private bool showForCurrentSelection;
 
         static PackageChangelogExtension()
         {
@@ -25,35 +30,81 @@ namespace TelleR
 
         public VisualElement CreateExtensionUI()
         {
-            root = new VisualElement();
-            root.style.display = DisplayStyle.None;
-            root.style.marginTop = 8;
-            root.style.marginBottom = 8;
+            placeholder = new VisualElement();
+            placeholder.style.display = DisplayStyle.None;
+
+            contentRoot = new VisualElement();
+            contentRoot.style.display = DisplayStyle.None;
+            contentRoot.style.marginTop = 8;
+            contentRoot.style.marginBottom = 8;
 
             var title = new Label("변경 이력 (CHANGELOG)");
             title.style.unityFontStyleAndWeight = FontStyle.Bold;
             title.style.fontSize = 13;
             title.style.marginBottom = 4;
-            root.Add(title);
+            contentRoot.Add(title);
 
             scrollView = new ScrollView();
-            scrollView.style.maxHeight = 280;
+            scrollView.style.maxHeight = 320;
             scrollView.style.backgroundColor = new Color(0f, 0f, 0f, 0.2f);
             scrollView.style.paddingTop = 6;
             scrollView.style.paddingBottom = 6;
             scrollView.style.paddingLeft = 10;
             scrollView.style.paddingRight = 10;
-            root.Add(scrollView);
+            contentRoot.Add(scrollView);
 
-            return root;
+            return placeholder;
         }
 
         public void OnPackageSelectionChange(PackageInfo packageInfo)
         {
-            if (root == null) return;
+            showForCurrentSelection = packageInfo != null && packageInfo.name == PackageName && TryLoadChangelog(packageInfo);
+            // 선택 직후에는 상세 UI가 아직 조립 전일 수 있어 한 프레임 뒤에 배치한다
+            EditorApplication.delayCall += ApplyPlacement;
+        }
 
-            bool show = packageInfo != null && packageInfo.name == PackageName && TryLoadChangelog(packageInfo);
-            root.style.display = show ? DisplayStyle.Flex : DisplayStyle.None;
+        private void ApplyPlacement()
+        {
+            if (contentRoot == null || placeholder == null) return;
+
+            if (!showForCurrentSelection)
+            {
+                contentRoot.style.display = DisplayStyle.None;
+                placeholder.style.display = DisplayStyle.None;
+                return;
+            }
+
+            VisualElement versionsTab = null;
+            if (placeholder.panel != null)
+                versionsTab = placeholder.panel.visualTree.Q<VisualElement>(VersionsTabElementName);
+
+            if (versionsTab != null)
+            {
+                // Version History 탭 안, 버전 목록 아래에 표시 (탭이 숨겨지면 함께 숨겨짐)
+                if (contentRoot.parent != versionsTab)
+                {
+                    contentRoot.RemoveFromHierarchy();
+                    versionsTab.Add(contentRoot);
+                }
+                contentRoot.style.display = DisplayStyle.Flex;
+                placeholder.style.display = DisplayStyle.None;
+            }
+            else
+            {
+                // 내부 이름이 다른 Unity 버전 폴백: 기본 슬롯에 접힌 Foldout으로 조용히 표시
+                if (fallbackFoldout == null)
+                {
+                    fallbackFoldout = new Foldout { text = "변경 이력 (CHANGELOG)", value = false };
+                    placeholder.Add(fallbackFoldout);
+                }
+                if (contentRoot.parent != fallbackFoldout)
+                {
+                    contentRoot.RemoveFromHierarchy();
+                    fallbackFoldout.Add(contentRoot);
+                }
+                contentRoot.style.display = DisplayStyle.Flex;
+                placeholder.style.display = DisplayStyle.Flex;
+            }
         }
 
         private bool TryLoadChangelog(PackageInfo info)
@@ -68,7 +119,7 @@ namespace TelleR
                 {
                     string line = raw.TrimEnd();
                     if (string.IsNullOrWhiteSpace(line)) continue;
-                    if (line.StartsWith("# ")) continue; // 문서 제목은 위 고정 타이틀로 대체
+                    if (line.StartsWith("# ")) continue; // 문서 제목은 고정 타이틀로 대체
 
                     var label = new Label();
                     label.style.whiteSpace = WhiteSpace.Normal;
