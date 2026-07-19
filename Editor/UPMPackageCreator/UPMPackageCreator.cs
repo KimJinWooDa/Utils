@@ -63,6 +63,7 @@ namespace TelleR
         private Label step2Status;
         private Label devModeStatus;
         private Button devModeButton;
+        private TextField gitUrlField;
 
         private VisualElement organizerContainer;
         private PopupField<string> organizerFeaturePopup;
@@ -776,7 +777,9 @@ namespace TelleR
             devModeLabel.style.marginBottom = 4;
             step3Container.Add(devModeLabel);
 
-            var devModeDesc = CreateHelpLabel("\u2139  Dev = 로컬 폴더에서 직접 수정  /  Deploy = git URL로 배포 (읽기 전용)");
+            var devModeDesc = CreateHelpLabel(
+                "ℹ  이 스위치는 현재 프로젝트의 Packages/manifest.json에서 이 패키지의 설치 소스를 바꿉니다.\n" +
+                "Dev = file:로컬 폴더 (수정 즉시 반영)  /  Deploy = git URL (푸시된 커밋 사용)");
             step3Container.Add(devModeDesc);
 
             devModeStatus = new Label("");
@@ -789,6 +792,26 @@ namespace TelleR
             devModeStatus.style.marginBottom = 10;
             devModeStatus.style.whiteSpace = WhiteSpace.Normal;
             step3Container.Add(devModeStatus);
+
+            var gitUrlRow = new VisualElement();
+            gitUrlRow.style.flexDirection = FlexDirection.Row;
+            gitUrlRow.style.alignItems = Align.Center;
+            gitUrlRow.style.marginBottom = 10;
+
+            var gitUrlLabel = new Label("Git URL");
+            gitUrlLabel.style.width = 60;
+            gitUrlLabel.style.color = TextSecondary;
+            gitUrlLabel.style.fontSize = 13;
+            gitUrlRow.Add(gitUrlLabel);
+
+            gitUrlField = new TextField();
+            gitUrlField.style.flexGrow = 1;
+            gitUrlField.style.height = 30;
+            gitUrlField.style.minHeight = 30;
+            gitUrlField.tooltip = "Deploy Mode 전환에 사용할 git 저장소 URL (예: https://github.com/USER/Repo.git)";
+            gitUrlRow.Add(gitUrlField);
+
+            step3Container.Add(gitUrlRow);
 
             devModeButton = CreateSecondaryButton("Switch Mode", ToggleDevMode);
             step3Container.Add(devModeButton);
@@ -1952,27 +1975,49 @@ namespace TelleR
                 return;
             }
 
-            string packageName = packageNameField.value;
+            // 전환 키는 입력 필드가 아니라 디스크의 package.json name 기준 (필드 편집 중 오염 방지)
+            string packageName = GetLoadedPackageName();
             string manifestContent = ReadFileShared(manifestPath);
 
             bool isDevMode = IsDevModeEnabled(manifestContent, packageName);
 
             if (isDevMode)
             {
-                string gitUrl = EditorPrefs.GetString($"UPMCreator_GitUrl_{packageName}", "");
+                // → Deploy: 실제 URL만 허용 (플레이스홀더가 기록되면 UPM resolve가 깨짐)
+                string gitUrl = (gitUrlField != null ? gitUrlField.value : "").Trim();
                 if (string.IsNullOrEmpty(gitUrl))
-                {
-                    gitUrl = $"https://github.com/USERNAME/{packageName}.git";
-                    int result = EditorUtility.DisplayDialogComplex(
-                        "Git URL",
-                        "Need Git URL for deploy mode.\nUse default?",
-                        "Use Default", "Cancel", "");
+                    gitUrl = EditorPrefs.GetString($"UPMCreator_GitUrl_{packageName}", "");
 
-                    if (result != 0) return;
+                if (string.IsNullOrEmpty(gitUrl) || gitUrl.Contains("USERNAME"))
+                {
+                    EditorUtility.DisplayDialog("Git URL 필요",
+                        "Deploy Mode는 실제 git 저장소 URL이 필요합니다.\nGit URL 칸에 입력해 주세요.\n예: https://github.com/KimJinWooDa/Utils.git", "OK");
+                    return;
                 }
 
+                if (!gitUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase) &&
+                    !gitUrl.StartsWith("git@", StringComparison.OrdinalIgnoreCase) &&
+                    !gitUrl.StartsWith("ssh://", StringComparison.OrdinalIgnoreCase))
+                {
+                    EditorUtility.DisplayDialog("Git URL 형식 오류",
+                        $"git URL 형식이 아닙니다:\n{gitUrl}\n\nhttps://, git@, ssh:// 로 시작해야 합니다.", "OK");
+                    return;
+                }
+
+                if (!EditorUtility.DisplayDialog("Switch to Deploy Mode",
+                    $"manifest.json의 '{packageName}' 소스를 git URL로 바꿉니다:\n{gitUrl}\n\n" +
+                    "확인해 주세요:\n" +
+                    "• 로컬 수정을 커밋 & 푸시했나요?\n" +
+                    "• 버전을 올려 package.json을 저장했나요?\n\n" +
+                    "전환하면 저장소의 최신 커밋을 받아옵니다.",
+                    "전환", "취소"))
+                    return;
+
+                EditorPrefs.SetString($"UPMCreator_GitUrl_{packageName}", gitUrl);
                 manifestContent = SetPackageSource(manifestContent, packageName, gitUrl);
                 WriteFileShared(manifestPath, manifestContent);
+                // lock에 커밋 해시가 고정되어 있으면 push해도 옛 코드가 유지됨 — 항목을 지워 재해석 강제
+                RemovePackagesLockEntry(packageName);
             }
             else
             {
@@ -1980,7 +2025,11 @@ namespace TelleR
 
                 string currentUrl = GetCurrentPackageSource(manifestContent, packageName);
                 if (!string.IsNullOrEmpty(currentUrl) && currentUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+                {
                     EditorPrefs.SetString($"UPMCreator_GitUrl_{packageName}", currentUrl);
+                    if (gitUrlField != null && string.IsNullOrEmpty(gitUrlField.value))
+                        gitUrlField.value = currentUrl;
+                }
 
                 manifestContent = SetPackageSource(manifestContent, packageName, localPath);
                 WriteFileShared(manifestPath, manifestContent);
@@ -2005,6 +2054,70 @@ namespace TelleR
         {
             string source = GetCurrentPackageSource(manifestContent, packageName);
             return !string.IsNullOrEmpty(source) && source.StartsWith("file:", StringComparison.OrdinalIgnoreCase);
+        }
+
+        // 전환 키의 진실의 원천 — Step 1 입력 필드가 아니라 디스크에 저장된 package.json의 name
+        private string GetLoadedPackageName()
+        {
+            try
+            {
+                string jsonPath = Path.Combine(currentPackagePath, "package.json");
+                if (File.Exists(jsonPath))
+                {
+                    var pkg = JsonUtility.FromJson<PackageJson>(SafeReadAllText(jsonPath));
+                    if (pkg != null && !string.IsNullOrEmpty(pkg.name)) return pkg.name;
+                }
+            }
+            catch { }
+            return packageNameField != null ? packageNameField.value : "";
+        }
+
+        // packages-lock.json에서 이 패키지 항목 제거 — git 의존성은 커밋 해시로 잠기므로
+        // 지우지 않으면 Deploy 전환 후에도 옛 커밋 코드가 유지된다
+        private void RemovePackagesLockEntry(string packageName)
+        {
+            try
+            {
+                string lockPath = Path.Combine(Application.dataPath, "..", "Packages", "packages-lock.json");
+                if (!File.Exists(lockPath)) return;
+
+                string content = ReadFileShared(lockPath);
+                var m = Regex.Match(content, $"\"{Regex.Escape(packageName)}\"\\s*:\\s*\\{{");
+                if (!m.Success) return;
+
+                int start = m.Index;
+                int depth = 0;
+                int end = -1;
+                for (int i = m.Index + m.Length - 1; i < content.Length; i++)
+                {
+                    if (content[i] == '{') depth++;
+                    else if (content[i] == '}')
+                    {
+                        depth--;
+                        if (depth == 0) { end = i; break; }
+                    }
+                }
+                if (end < 0) return;
+
+                int removeEnd = end + 1;
+                int probe = removeEnd;
+                while (probe < content.Length && char.IsWhiteSpace(content[probe])) probe++;
+                if (probe < content.Length && content[probe] == ',')
+                    removeEnd = probe + 1;
+                else
+                {
+                    int back = start - 1;
+                    while (back >= 0 && char.IsWhiteSpace(content[back])) back--;
+                    if (back >= 0 && content[back] == ',') start = back;
+                }
+
+                content = content.Remove(start, removeEnd - start);
+                WriteFileShared(lockPath, content);
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"[UPM Creator] packages-lock 갱신 실패 (Package Manager의 Update로 대체 가능): {e.Message}");
+            }
         }
 
         private string GetCurrentPackageSource(string manifestContent, string packageName)
@@ -2062,29 +2175,43 @@ namespace TelleR
                 return;
             }
 
-            string packageName = packageNameField.value;
+            string packageName = GetLoadedPackageName();
             string manifestContent = ReadFileShared(manifestPath);
             string source = GetCurrentPackageSource(manifestContent, packageName);
             bool isDevMode = !string.IsNullOrEmpty(source) && source.StartsWith("file:", StringComparison.OrdinalIgnoreCase);
 
+            // Deploy 전환용 URL 칸 자동 채움 (현재 git 소스 → 저장된 URL 순)
+            if (gitUrlField != null && string.IsNullOrEmpty(gitUrlField.value))
+            {
+                if (!isDevMode && !string.IsNullOrEmpty(source) && source.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+                    gitUrlField.value = source;
+                else
+                {
+                    string savedUrl = EditorPrefs.GetString($"UPMCreator_GitUrl_{packageName}", "");
+                    if (!string.IsNullOrEmpty(savedUrl)) gitUrlField.value = savedUrl;
+                }
+            }
+
             if (isDevMode)
             {
-                devModeStatus.text = $"DEV MODE  -  local path (editable)\n{source}";
+                devModeStatus.text = $"DEV MODE — 로컬 폴더 참조 (수정이 즉시 반영됨)\n{source}";
                 devModeStatus.style.color = AccentGreen;
                 SetBorder(devModeStatus.style, 1, new Color(AccentGreen.r, AccentGreen.g, AccentGreen.b, 0.4f));
                 devModeStatus.style.backgroundColor = new Color(AccentGreen.r, AccentGreen.g, AccentGreen.b, 0.08f);
-                devModeButton.text = "Deploy Mode (git URL)";
+                devModeButton.text = "→ Deploy Mode로 전환 (git URL 사용)";
                 devModeButton.style.backgroundColor = new Color(AccentAmber.r, AccentAmber.g, AccentAmber.b, 0.15f);
                 devModeButton.style.color = AccentAmber;
                 SetBorder(devModeButton.style, 1, new Color(AccentAmber.r, AccentAmber.g, AccentAmber.b, 0.3f));
             }
             else
             {
-                devModeStatus.text = $"DEPLOY MODE  -  git URL (read-only)\n{(string.IsNullOrEmpty(source) ? "(not registered)" : source)}";
+                devModeStatus.text = string.IsNullOrEmpty(source)
+                    ? "미등록 — 이 프로젝트의 manifest.json에 아직 없습니다.\nDev Mode로 전환하면 로컬 경로(file:)로 추가됩니다."
+                    : $"DEPLOY MODE — git 참조 (푸시 후 재전환·Update 전까지 코드 고정)\n{source}";
                 devModeStatus.style.color = AccentAmber;
                 SetBorder(devModeStatus.style, 1, new Color(AccentAmber.r, AccentAmber.g, AccentAmber.b, 0.4f));
                 devModeStatus.style.backgroundColor = new Color(AccentAmber.r, AccentAmber.g, AccentAmber.b, 0.08f);
-                devModeButton.text = "Dev Mode (local path)";
+                devModeButton.text = "→ Dev Mode로 전환 (로컬 폴더 사용)";
                 devModeButton.style.backgroundColor = new Color(AccentGreen.r, AccentGreen.g, AccentGreen.b, 0.15f);
                 devModeButton.style.color = AccentGreen;
                 SetBorder(devModeButton.style, 1, new Color(AccentGreen.r, AccentGreen.g, AccentGreen.b, 0.3f));
