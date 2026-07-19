@@ -525,11 +525,12 @@ namespace TelleR.Tools.Editor
             int group = Undo.GetCurrentGroup();
             MeshFilter mf = tool.GetComponent<MeshFilter>();
             SkinnedMeshRenderer smr = tool.GetComponent<SkinnedMeshRenderer>();
-            MeshCollider mc = tool.GetComponent<MeshCollider>();
             Mesh mesh = GetMeshFromTool(tool);
             if (mf != null) Undo.RecordObject(mf, name);
             if (smr != null) Undo.RecordObject(smr, name);
-            if (mc != null) Undo.RecordObject(mc, name);
+            // 프리미티브 콜라이더 center 보정까지 되돌리려면 모든 콜라이더를 기록해야 함
+            foreach (var col in tool.GetComponents<Collider>())
+                Undo.RecordObject(col, name);
             if (mesh != null) Undo.RecordObject(mesh, name);
             Undo.RecordObject(tool, name);
             Undo.RecordObject(tool.transform, name);

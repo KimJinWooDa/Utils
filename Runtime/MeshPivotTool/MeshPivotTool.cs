@@ -126,9 +126,26 @@ namespace TelleR.Tools
                 t.position += worldDelta;
                 for (int i = 0; i < t.childCount; i++)
                     t.GetChild(i).position -= worldDelta;
+
+                // 프리미티브 콜라이더의 center는 로컬 오프셋이라 transform과 함께 월드에서 움직인다.
+                // 버텍스와 같은 보정을 적용해 콜라이더가 메시를 계속 감싸게 한다.
+                TranslatePrimitiveColliderCenters(localPoint);
             }
 
             RefreshMeshCollider();
+        }
+
+        private void TranslatePrimitiveColliderCenters(Vector3 localDelta)
+        {
+            foreach (var col in GetComponents<Collider>())
+            {
+                switch (col)
+                {
+                    case BoxCollider box: box.center -= localDelta; break;
+                    case SphereCollider sphere: sphere.center -= localDelta; break;
+                    case CapsuleCollider capsule: capsule.center -= localDelta; break;
+                }
+            }
         }
 
         public void SetPivotRotation(Quaternion targetWorldRotation)
@@ -220,9 +237,34 @@ namespace TelleR.Tools
                 {
                     t.rotation = t.rotation * deltaRot;
                 }
+
+                RotatePrimitiveColliderCenters(inverseRot);
             }
 
             RefreshMeshCollider();
+        }
+
+        [System.NonSerialized] private bool warnedColliderAxis;
+
+        private void RotatePrimitiveColliderCenters(Quaternion inverseRot)
+        {
+            bool hasAxisCollider = false;
+            foreach (var col in GetComponents<Collider>())
+            {
+                switch (col)
+                {
+                    case BoxCollider box: box.center = inverseRot * box.center; hasAxisCollider = true; break;
+                    case SphereCollider sphere: sphere.center = inverseRot * sphere.center; break;
+                    case CapsuleCollider capsule: capsule.center = inverseRot * capsule.center; hasAxisCollider = true; break;
+                }
+            }
+
+            // Box/Capsule의 축 방향은 API상 회전시킬 수 없어 center만 보정된다 — 1회만 경고
+            if (hasAxisCollider && !warnedColliderAxis)
+            {
+                warnedColliderAxis = true;
+                Debug.LogWarning("[MeshPivotTool] Box/Capsule 콜라이더의 축 방향은 피벗 회전을 따라가지 못합니다. 회전 후 콜라이더 크기·방향을 확인하세요.", this);
+            }
         }
 
         public void AlignToWorld()
@@ -289,6 +331,11 @@ namespace TelleR.Tools
 
             Mesh mesh = GetSharedMesh();
             if (mesh == null) return;
+
+            // 렌더 메시와 무관한 커스텀 콜라이더 메시(간소화 메시 등)는 덮어쓰지 않는다
+            if (meshCollider.sharedMesh != null &&
+                meshCollider.sharedMesh != workingMesh &&
+                meshCollider.sharedMesh != originalMesh) return;
 
             meshCollider.sharedMesh = null;
             meshCollider.sharedMesh = mesh;
