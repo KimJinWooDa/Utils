@@ -21,6 +21,14 @@ namespace TelleR.Tools
 
         public bool UseSkinnedMesh => useSkinnedMesh;
 
+        // 에디터가 sharedMesh 교체를 Undo에 기록할 수 있도록 초기화 필요 여부를 노출
+        public bool NeedsInitialization => workingMesh == null && !pendingRemoval && GetSharedMesh() != null;
+
+        private bool pendingRemoval;
+
+        // Revert/Apply 후 delayCall 파괴 대기 중 OnSceneGUI가 재초기화하는 레이스 방지
+        public void MarkPendingRemoval() => pendingRemoval = true;
+
         private Mesh GetSharedMesh()
         {
             if (useSkinnedMesh)
@@ -48,6 +56,8 @@ namespace TelleR.Tools
 
         public void EnsureInitialized()
         {
+            if (pendingRemoval) return;
+
             if (!useSkinnedMesh)
             {
                 MeshFilter mf = GetComponent<MeshFilter>();
@@ -88,13 +98,36 @@ namespace TelleR.Tools
         {
             EnsureInitialized();
             if (workingMesh == null) return;
-            if (localPoint.sqrMagnitude <= 0.0001f) return;
+            if (localPoint.sqrMagnitude <= 1e-12f) return;
 
             Vector3[] verts = workingMesh.vertices;
             for (int i = 0; i < verts.Length; i++) verts[i] -= localPoint;
             workingMesh.vertices = verts;
             workingMesh.RecalculateBounds();
-            workingMesh.RecalculateNormals();
+            // 평행이동은 노말에 영향이 없으므로 RecalculateNormals를 호출하지 않는다 (임포트 노말 보존)
+
+            if (useSkinnedMesh)
+            {
+                // 스킨드: bindpose를 함께 이동해야 스키닝 결과가 보존됨 (버텍스만 옮기면 애니메이션 시 왜곡)
+                Matrix4x4[] bindposes = workingMesh.bindposes;
+                if (bindposes != null && bindposes.Length > 0)
+                {
+                    Matrix4x4 offset = Matrix4x4.Translate(localPoint);
+                    for (int i = 0; i < bindposes.Length; i++) bindposes[i] = bindposes[i] * offset;
+                    workingMesh.bindposes = bindposes;
+                }
+            }
+            else
+            {
+                // 피벗 이동의 표준 semantics: 메시는 월드에 고정되고 transform(피벗)이 이동한다.
+                // transform을 함께 옮기지 않으면 배치된 오브젝트가 화면에서 움직여 버린다.
+                Transform t = transform;
+                Vector3 worldDelta = t.TransformVector(localPoint);
+                t.position += worldDelta;
+                for (int i = 0; i < t.childCount; i++)
+                    t.GetChild(i).position -= worldDelta;
+            }
+
             RefreshMeshCollider();
         }
 
@@ -127,11 +160,15 @@ namespace TelleR.Tools
             for (int i = 0; i < verts.Length; i++) verts[i] = inverseRot * verts[i];
             workingMesh.vertices = verts;
             workingMesh.RecalculateBounds();
-            workingMesh.RecalculateNormals();
 
+            // 원본 노말을 버텍스와 같은 회전으로 변환한다.
+            // RecalculateNormals 후 다시 회전시키면 노말이 지오메트리와 어긋나 셰이딩이 파괴됨.
             Vector3[] normals = workingMesh.normals;
-            for (int i = 0; i < normals.Length; i++) normals[i] = inverseRot * normals[i];
-            workingMesh.normals = normals;
+            if (normals != null && normals.Length > 0)
+            {
+                for (int i = 0; i < normals.Length; i++) normals[i] = inverseRot * normals[i];
+                workingMesh.normals = normals;
+            }
 
             if (workingMesh.tangents != null && workingMesh.tangents.Length > 0)
             {
@@ -143,6 +180,46 @@ namespace TelleR.Tools
                     tangents[i] = new Vector4(tan.x, tan.y, tan.z, tangents[i].w);
                 }
                 workingMesh.tangents = tangents;
+            }
+
+            if (useSkinnedMesh)
+            {
+                // 스킨드: bindpose에 같은 회전을 곱해 스키닝 결과를 보존
+                Matrix4x4[] bindposes = workingMesh.bindposes;
+                if (bindposes != null && bindposes.Length > 0)
+                {
+                    Matrix4x4 rot = Matrix4x4.Rotate(deltaRot);
+                    for (int i = 0; i < bindposes.Length; i++) bindposes[i] = bindposes[i] * rot;
+                    workingMesh.bindposes = bindposes;
+                }
+            }
+            else
+            {
+                // 메시는 월드에 고정되고 피벗 축이 회전한다. 자식은 월드 자세를 유지시킨다.
+                Transform t = transform;
+                int childCount = t.childCount;
+                if (childCount > 0)
+                {
+                    var childPos = new Vector3[childCount];
+                    var childRot = new Quaternion[childCount];
+                    for (int i = 0; i < childCount; i++)
+                    {
+                        Transform c = t.GetChild(i);
+                        childPos[i] = c.position;
+                        childRot[i] = c.rotation;
+                    }
+                    t.rotation = t.rotation * deltaRot;
+                    for (int i = 0; i < childCount; i++)
+                    {
+                        Transform c = t.GetChild(i);
+                        c.position = childPos[i];
+                        c.rotation = childRot[i];
+                    }
+                }
+                else
+                {
+                    t.rotation = t.rotation * deltaRot;
+                }
             }
 
             RefreshMeshCollider();
@@ -191,6 +268,18 @@ namespace TelleR.Tools
             }
 
             RefreshMeshCollider();
+        }
+
+        // 에디터용: 원본 복원 후 workingMesh를 파괴하지 않고 반환한다.
+        // (Undo 스택에 기록된 메시를 plain DestroyImmediate로 파괴하면 Ctrl+Z 시 파괴된 메시를 참조하게 됨)
+        public Mesh DetachWorkingMesh()
+        {
+            if (originalMesh != null) SetSharedMesh(originalMesh);
+
+            Mesh detached = workingMesh;
+            workingMesh = null;
+            RefreshMeshCollider();
+            return detached;
         }
 
         private void RefreshMeshCollider()

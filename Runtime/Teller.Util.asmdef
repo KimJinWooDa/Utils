@@ -5,7 +5,13 @@
   "excludePlatforms": [],
   "references": [
     "Unity.RenderPipelines.Universal.Runtime",
-    "Unity.RenderPipelines.Core.Runtime",
-    "Unity.XR.Management"
+    "Unity.RenderPipelines.Core.Runtime"
+  ],
+  "versionDefines": [
+    {
+      "name": "com.unity.render-pipelines.universal",
+      "expression": "",
+      "define": "TELLER_URP"
+    }
   ]
 }

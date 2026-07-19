@@ -11,7 +11,8 @@ namespace TelleR
     {
         private static readonly string[] SupportedExtensions = { ".png", ".jpg", ".jpeg", ".tga", ".bmp", ".psd", ".gif", ".hdr", ".exr", ".tif", ".tiff" };
 
-        private enum EncodeFormat { None, Png, Jpg, Tga, Exr }
+        // EXR은 8bit 파이프라인(Color32)에서 HDR 데이터가 파괴되므로 덮어쓰기 대상에서 제외 (임포터 변경만 수행)
+        private enum EncodeFormat { None, Png, Jpg, Tga }
 
         private List<string> dropPaths = new List<string>();
         private Vector2 scroll;
@@ -172,7 +173,12 @@ namespace TelleR
                 {
                     bool ok = EditorUtility.DisplayDialog(
                         "Overwrite Originals?",
-                        $"{dropPaths.Count}개 중 인코딩 가능한 포맷(PNG/JPG/TGA/EXR) 원본이 덮어쓰기됩니다.\n나머지는 임포터만 변경됩니다.\n계속하시겠습니까?",
+                        $"{dropPaths.Count}개 처리 내용:\n\n" +
+                        "• PNG/JPG/TGA: 배경 제거·트림 결과로 원본 파일이 덮어쓰기됩니다 (되돌리기 불가).\n" +
+                        "• JPG: 재인코딩으로 품질이 저하되며 반복 실행 시 누적됩니다.\n" +
+                        "• 그 외 포맷: 파일은 유지되고 임포터만 Sprite(Single)로 변경됩니다.\n" +
+                        "• Sprite Mode가 Multiple인 시트는 슬라이스 보호를 위해 건너뜁니다.\n\n" +
+                        "계속하시겠습니까?",
                         "Process", "Cancel");
                     if (ok) Process();
                 }
@@ -236,13 +242,12 @@ namespace TelleR
             if (path.EndsWith(".png", StringComparison.OrdinalIgnoreCase)) return EncodeFormat.Png;
             if (path.EndsWith(".jpg", StringComparison.OrdinalIgnoreCase) || path.EndsWith(".jpeg", StringComparison.OrdinalIgnoreCase)) return EncodeFormat.Jpg;
             if (path.EndsWith(".tga", StringComparison.OrdinalIgnoreCase)) return EncodeFormat.Tga;
-            if (path.EndsWith(".exr", StringComparison.OrdinalIgnoreCase)) return EncodeFormat.Exr;
             return EncodeFormat.None;
         }
 
         private void Process()
         {
-            int processed = 0, trimmed = 0, skipped = 0;
+            int processed = 0, trimmed = 0, skipped = 0, protectedSheets = 0;
 
             try
             {
@@ -254,6 +259,9 @@ namespace TelleR
                     EditorUtility.DisplayProgressBar("Processing", path, (float)i / dropPaths.Count);
 
                     if (!IsSupportedImage(path)) { skipped++; continue; }
+
+                    // Multiple 시트는 수작업 슬라이스가 파괴되므로 건드리지 않음
+                    if (IsMultipleSprite(path)) { protectedSheets++; continue; }
 
                     EncodeFormat fmt = GetEncodeFormat(path);
                     if (fmt != EncodeFormat.None)
@@ -282,8 +290,15 @@ namespace TelleR
             }
 
             _lastReport = $"Imported: {processed} / Trimmed: {trimmed} / Skipped: {skipped}";
+            if (protectedSheets > 0) _lastReport += $" / Multiple 시트 보호 스킵: {protectedSheets}";
             Debug.Log("[AutoSpriteSlicer] " + _lastReport);
             BuildPreview();
+        }
+
+        private static bool IsMultipleSprite(string path)
+        {
+            var importer = AssetImporter.GetAtPath(path) as TextureImporter;
+            return importer != null && importer.spriteImportMode == SpriteImportMode.Multiple;
         }
 
         private static bool ApplySingleSpriteImporter(string path)
@@ -364,7 +379,6 @@ namespace TelleR
                     case EncodeFormat.Png: return tex.EncodeToPNG();
                     case EncodeFormat.Jpg: return tex.EncodeToJPG(jpgQuality);
                     case EncodeFormat.Tga: return tex.EncodeToTGA();
-                    case EncodeFormat.Exr: return tex.EncodeToEXR(Texture2D.EXRFlags.CompressZIP);
                     default: return null;
                 }
             }
@@ -401,7 +415,8 @@ namespace TelleR
         private static Texture2D BlitToReadable(Texture2D src)
         {
             var prev = RenderTexture.active;
-            var rt = RenderTexture.GetTemporary(src.width, src.height, 0, RenderTextureFormat.ARGB32, RenderTextureReadWrite.Linear);
+            // sRGB로 왕복해야 Linear 색공간 프로젝트에서도 바이트 값이 보존됨 (Linear 고정 시 재저장 색 왜곡)
+            var rt = RenderTexture.GetTemporary(src.width, src.height, 0, RenderTextureFormat.ARGB32, RenderTextureReadWrite.sRGB);
             Graphics.Blit(src, rt);
             RenderTexture.active = rt;
             var dst = new Texture2D(src.width, src.height, TextureFormat.RGBA32, false);
@@ -419,7 +434,7 @@ namespace TelleR
             for (int i = 0; i < dropPaths.Count; i++)
             {
                 string p = dropPaths[i];
-                if (GetEncodeFormat(p) != EncodeFormat.None && File.Exists(p)) { targetPath = p; break; }
+                if (GetEncodeFormat(p) != EncodeFormat.None && File.Exists(p) && !IsMultipleSprite(p)) { targetPath = p; break; }
             }
             if (targetPath == null) return;
 
@@ -552,6 +567,7 @@ namespace TelleR
             for (int i = 0; i < corners.Length; i++)
             {
                 Color32 c = corners[i];
+                if (c.a == 0) continue; // 투명 코너의 RGB는 배경키가 아님 (오브젝트 동일색 침식 방지)
                 bool dup = false;
                 for (int j = 0; j < unique.Count; j++)
                 {
@@ -589,8 +605,6 @@ namespace TelleR
                 int sx = seed % w;
                 int rowStart = sy * w;
 
-                // 시드 자체가 다른 경로로 처리되었으면 스킵
-                if (px[seed].a == 0 && visited[seed] == false) { /* 정상 시드 */ }
                 int left = sx;
                 while (left > 0 && !visited[rowStart + left - 1] && MatchKey32(px[rowStart + left - 1], keys, tolByte)) left--;
                 int right = sx;

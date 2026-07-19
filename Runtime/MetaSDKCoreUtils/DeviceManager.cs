@@ -1,7 +1,9 @@
 using System;
 using UnityEngine;
 using UnityEngine.Rendering;
+#if TELLER_URP
 using UnityEngine.Rendering.Universal;
+#endif
 
 namespace TelleR
 {
@@ -29,6 +31,10 @@ namespace TelleR
 
         private void Start()
         {
+#if !TELLER_URP
+            // URP 패키지 미설치 프로젝트에서도 패키지 전체가 컴파일되도록 가드 (versionDefines로 정의됨)
+            Debug.LogWarning("[DeviceManager] URP 패키지가 없어 MSAA 프로필을 적용하지 않습니다.");
+#else
             if (Application.platform != RuntimePlatform.Android) return;
 
             UniversalRenderPipelineAsset urpAsset = GraphicsSettings.currentRenderPipeline as UniversalRenderPipelineAsset;
@@ -60,6 +66,7 @@ namespace TelleR
                 urpAsset.msaaSampleCount = (int)fallback.msaa;
                 Debug.Log($"<color=red>Device is not Quest 2/3 series - MSAA set to {fallback.msaa}.</color>");
             }
+#endif
         }
     }
 }

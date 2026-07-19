@@ -31,11 +31,24 @@ namespace TelleR.Tools.Editor
         private void OnEnable()
         {
             MeshPivotTool tool = target as MeshPivotTool;
-            if (tool != null)
-            {
-                tool.EnsureInitialized();
-            }
+            InitializeToolWithUndo(tool);
             CacheVertices(tool);
+        }
+
+        // 최초 sharedMesh 교체(원본 → 사본)를 Undo에 기록한다.
+        // 미기록 시 컴포넌트 추가 직후 Ctrl+Z를 누르면 원본 에셋 링크가 유실된다.
+        private void InitializeToolWithUndo(MeshPivotTool tool)
+        {
+            if (tool == null) return;
+            if (tool.NeedsInitialization)
+            {
+                MeshFilter mf = tool.GetComponent<MeshFilter>();
+                SkinnedMeshRenderer smr = tool.GetComponent<SkinnedMeshRenderer>();
+                if (mf != null) Undo.RecordObject(mf, "Begin Pivot Edit");
+                if (smr != null) Undo.RecordObject(smr, "Begin Pivot Edit");
+                Undo.RecordObject(tool, "Begin Pivot Edit");
+            }
+            tool.EnsureInitialized();
         }
 
         private Mesh GetMeshFromTool(MeshPivotTool tool)
@@ -73,6 +86,13 @@ namespace TelleR.Tools.Editor
             if (tool == null) return;
             serializedObject.Update();
             DrawHeader(tool);
+            if (tool.UseSkinnedMesh)
+            {
+                EditorGUILayout.HelpBox(
+                    "스킨드 메시는 bindpose를 함께 보정하는 방식이라 씬 드래그 핸들 없이 " +
+                    "프리셋·버튼·버텍스 스냅만 지원합니다. 렌더링은 본이 결정하므로 화면 변화가 없을 수 있습니다.",
+                    MessageType.Info);
+            }
             EditorGUILayout.Space(6);
             DrawModeToggle();
             EditorGUILayout.Space(6);
@@ -90,7 +110,7 @@ namespace TelleR.Tools.Editor
         {
             MeshPivotTool tool = target as MeshPivotTool;
             if (tool == null || Application.isPlaying) return;
-            tool.EnsureInitialized();
+            InitializeToolWithUndo(tool);
             CacheVertices(tool);
             Event e = Event.current;
             bool ctrlHeld = e.control || e.command;
@@ -124,7 +144,9 @@ namespace TelleR.Tools.Editor
             }
 
             Transform t = tool.transform;
-            if (currentMode == HandleMode.Position && !ctrlHeld)
+            // 스킨드 메시는 transform을 이동시키지 않으므로(bindpose 보정 방식) 드래그 핸들이
+            // 증분을 만들 수 없다 — 프리셋·버튼·버텍스 스냅만 지원하고 핸들은 숨긴다.
+            if (currentMode == HandleMode.Position && !ctrlHeld && !tool.UseSkinnedMesh)
             {
                 Vector3 pivotWorld = t.position;
                 EditorGUI.BeginChangeCheck();
@@ -143,7 +165,7 @@ namespace TelleR.Tools.Editor
                     MarkDirty(tool);
                 }
             }
-            else if (currentMode == HandleMode.Rotation)
+            else if (currentMode == HandleMode.Rotation && !tool.UseSkinnedMesh)
             {
                 EditorGUI.BeginChangeCheck();
                 Quaternion handleRot = t.rotation;
@@ -452,7 +474,7 @@ namespace TelleR.Tools.Editor
 
         private void ApplyPreset(MeshPivotTool tool, PivotPreset preset)
         {
-            tool.EnsureInitialized();
+            InitializeToolWithUndo(tool);
             Bounds b = tool.GetCurrentLocalBounds();
             Vector3 point = b.center;
             switch (preset)
@@ -472,6 +494,7 @@ namespace TelleR.Tools.Editor
         private void ApplyAndRemove(MeshPivotTool tool)
         {
             serializedObject.ApplyModifiedProperties();
+            tool.MarkPendingRemoval();
             SafeDestroy(tool);
             SceneView.RepaintAll();
         }
@@ -486,9 +509,12 @@ namespace TelleR.Tools.Editor
             if (mc != null) Undo.RecordObject(mc, "Revert Pivot");
             Undo.RecordObject(tool, "Revert Pivot");
             Undo.RecordObject(tool.transform, "Revert Pivot");
-            tool.RestoreOriginalMesh();
+            tool.MarkPendingRemoval();
+            // workingMesh는 Undo 스택에 기록되어 있으므로 plain DestroyImmediate가 아니라 Undo로 파괴한다
+            Mesh detached = tool.DetachWorkingMesh();
             if (mf != null) EditorUtility.SetDirty(mf);
             if (smr != null) EditorUtility.SetDirty(smr);
+            if (detached != null) Undo.DestroyObjectImmediate(detached);
             SafeDestroy(tool);
             SceneView.RepaintAll();
         }
@@ -507,6 +533,9 @@ namespace TelleR.Tools.Editor
             if (mesh != null) Undo.RecordObject(mesh, name);
             Undo.RecordObject(tool, name);
             Undo.RecordObject(tool.transform, name);
+            // 자식은 월드 자세 유지를 위해 함께 이동하므로 같이 기록
+            for (int i = 0; i < tool.transform.childCount; i++)
+                Undo.RecordObject(tool.transform.GetChild(i), name);
             Undo.CollapseUndoOperations(group);
         }
 
@@ -519,6 +548,7 @@ namespace TelleR.Tools.Editor
             if (mf != null) EditorUtility.SetDirty(mf);
             if (smr != null) EditorUtility.SetDirty(smr);
             if (mesh != null) EditorUtility.SetDirty(mesh);
+            cachedMeshId = 0; // 정점이 이동했으므로 버텍스 스냅 캐시 무효화
             SceneView.RepaintAll();
         }
 

@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 using System.Collections.Generic;
 using UnityEditor;
 using UnityEngine;
@@ -830,7 +831,7 @@ namespace TelleR
             string featureName = NormalizeFeatureName(newFeatureNameField.value);
             if (string.IsNullOrEmpty(featureName))
             {
-                EditorUtility.DisplayDialog("Error", "Enter a feature name first.\n(e.g. AudioVolume3D)", "OK");
+                EditorUtility.DisplayDialog("Error", "올바른 기능 이름을 입력하세요. (예: AudioVolume3D)\n경로 문자, '..', Resources/Editor/Runtime은 사용할 수 없습니다.", "OK");
                 return;
             }
 
@@ -1061,7 +1062,7 @@ namespace TelleR
             string featureName = NormalizeFeatureName(newFeatureNameField.value);
             if (string.IsNullOrEmpty(featureName))
             {
-                EditorUtility.DisplayDialog("Error", "Enter a feature name first.", "OK");
+                EditorUtility.DisplayDialog("Error", "올바른 기능 이름을 입력하세요.\n경로 문자, '..', Resources/Editor/Runtime은 사용할 수 없습니다.", "OK");
                 return;
             }
 
@@ -1481,9 +1482,12 @@ namespace TelleR
             var addedShaders = new List<string>();
             var addedShadersRes = new List<string>();
 
+            var failedItems = new List<string>();
+            try
+            {
             foreach (var item in pendingItems)
             {
-                if (!File.Exists(item.SourceFullPath)) continue;
+                if (!File.Exists(item.SourceFullPath)) { failedItems.Add(Path.GetFileName(item.SourceFullPath)); continue; }
 
                 string fileName = Path.GetFileName(item.SourceFullPath);
 
@@ -1621,6 +1625,28 @@ namespace TelleR
                     }
                 }
             }
+            }
+            catch (Exception e)
+            {
+                AssetDatabase.Refresh(ImportAssetOptions.ForceUpdate);
+                RefreshFeatureList();
+                EditorUtility.DisplayDialog("Error",
+                    $"복사 중 오류로 중단되었습니다. 일부만 복사되었을 수 있습니다:\n{e.Message}\n\n대기 목록은 유지됩니다.", "OK");
+                return;
+            }
+
+            int copiedTotal = addedScriptsEditor.Count + addedScriptsRuntime.Count
+                + addedImagesEditor.Count + addedImagesRuntime.Count
+                + addedImagesEditorRes.Count + addedImagesRuntimeRes.Count
+                + addedResourcesEditor.Count + addedResourcesRuntime.Count
+                + addedResourcesEditorRes.Count + addedResourcesRuntimeRes.Count
+                + addedShaders.Count + addedShadersRes.Count;
+            if (copiedTotal == 0)
+            {
+                EditorUtility.DisplayDialog("Nothing Copied",
+                    "복사된 파일이 없습니다. 원본이 이동/삭제되었는지 확인하세요.\n대기 목록은 유지됩니다.", "OK");
+                return;
+            }
 
             newFeatureNameField.value = "";
             pendingItems.Clear();
@@ -1644,6 +1670,7 @@ namespace TelleR
             if (addedResourcesRuntimeRes.Count > 0) message += $"Runtime Res(Asset): {addedResourcesRuntimeRes.Count} ({string.Join(", ", addedResourcesRuntimeRes)})\n";
             if (addedShaders.Count > 0) message += $"Shader: {addedShaders.Count} ({string.Join(", ", addedShaders)})\n";
             if (addedShadersRes.Count > 0) message += $"Shader(Res): {addedShadersRes.Count} ({string.Join(", ", addedShadersRes)})\n";
+            if (failedItems.Count > 0) message += $"\n건너뜀(원본 없음): {string.Join(", ", failedItems)}";
 
             EditorUtility.DisplayDialog("Done", message, "OK");
         }
@@ -1665,15 +1692,35 @@ namespace TelleR
 
         private void DeleteFeature(string featureName)
         {
-            if (!EditorUtility.DisplayDialog("Delete Feature", $"Delete '{featureName}'?", "Delete", "Cancel"))
+            // 기존 폴더 구조에서 예약어 이름이 기능 카드로 노출된 경우의 루트 삭제 사고 방어
+            if (string.IsNullOrEmpty(featureName) ||
+                featureName.Equals("Resources", StringComparison.OrdinalIgnoreCase) ||
+                featureName.Equals("Editor", StringComparison.OrdinalIgnoreCase) ||
+                featureName.Equals("Runtime", StringComparison.OrdinalIgnoreCase))
+            {
+                EditorUtility.DisplayDialog("Error", $"'{featureName}'은(는) 구조 폴더명이라 여기서 삭제할 수 없습니다.\n탐색기에서 직접 정리해 주세요.", "OK");
+                return;
+            }
+
+            var deleteTargets = new List<string>
+            {
+                Path.Combine(currentPackagePath, "Editor", featureName),
+                Path.Combine(currentPackagePath, "Runtime", featureName),
+                Path.Combine(currentPackagePath, "Editor", "Resources", featureName),
+                Path.Combine(currentPackagePath, "Runtime", "Resources", featureName),
+            };
+            var existingTargets = deleteTargets.Where(Directory.Exists).ToList();
+            if (existingTargets.Count == 0) return;
+
+            string listText = string.Join("\n", existingTargets.Select(p => "- " + p.Replace(currentPackagePath, "").TrimStart('\\', '/')));
+            if (!EditorUtility.DisplayDialog("Delete Feature",
+                $"Delete '{featureName}'?\n\n다음 폴더가 영구 삭제됩니다 (휴지통 미사용):\n{listText}", "Delete", "Cancel"))
                 return;
 
             try
             {
-                DeleteDirIfExists(Path.Combine(currentPackagePath, "Editor", featureName));
-                DeleteDirIfExists(Path.Combine(currentPackagePath, "Runtime", featureName));
-                DeleteDirIfExists(Path.Combine(currentPackagePath, "Editor", "Resources", featureName));
-                DeleteDirIfExists(Path.Combine(currentPackagePath, "Runtime", "Resources", featureName));
+                foreach (string dir in existingTargets)
+                    DeleteDirIfExists(dir);
 
                 AssetDatabase.Refresh(ImportAssetOptions.ForceUpdate);
                 RefreshFeatureList();
@@ -1736,7 +1783,13 @@ namespace TelleR
 
                 string destPath = Path.Combine(destDir, entry.FileName);
 
-                if (File.Exists(destPath)) File.Delete(destPath);
+                if (File.Exists(destPath))
+                {
+                    if (!EditorUtility.DisplayDialog("Overwrite File?",
+                        $"'{entry.FileName}'이(가) 대상 폴더에 이미 있습니다.\n덮어쓰면 기존 파일은 영구 삭제됩니다.", "Overwrite", "Cancel"))
+                        return;
+                    File.Delete(destPath);
+                }
                 File.Move(entry.FullPath, destPath);
 
                 string srcMeta = entry.FullPath + ".meta";
@@ -1956,39 +2009,33 @@ namespace TelleR
 
         private string GetCurrentPackageSource(string manifestContent, string packageName)
         {
-            string pattern = $"\"{packageName}\": \"";
-            int startIndex = manifestContent.IndexOf(pattern, StringComparison.Ordinal);
-            if (startIndex == -1) return null;
-
-            startIndex += pattern.Length;
-            int endIndex = manifestContent.IndexOf("\"", startIndex, StringComparison.Ordinal);
-            if (endIndex == -1) return null;
-
-            return manifestContent.Substring(startIndex, endIndex - startIndex);
+            // 콜론 뒤 공백 유무와 무관하게 매칭 (기존 고정 문자열 매칭은 포맷이 다르면 중복 키를 만들었음)
+            var m = Regex.Match(manifestContent, $"\"{Regex.Escape(packageName)}\"\\s*:\\s*\"([^\"]*)\"");
+            return m.Success ? m.Groups[1].Value : null;
         }
 
         private string SetPackageSource(string manifestContent, string packageName, string newSource)
         {
-            string pattern = $"\"{packageName}\": \"";
-            int startIndex = manifestContent.IndexOf(pattern, StringComparison.Ordinal);
+            var m = Regex.Match(manifestContent, $"\"{Regex.Escape(packageName)}\"\\s*:\\s*\"([^\"]*)\"");
 
-            if (startIndex == -1)
+            if (!m.Success)
             {
-                int dependenciesIndex = manifestContent.IndexOf("\"dependencies\"", StringComparison.Ordinal);
-                if (dependenciesIndex == -1) return manifestContent;
+                var dep = Regex.Match(manifestContent, "\"dependencies\"\\s*:\\s*\\{");
+                if (!dep.Success) return manifestContent;
 
-                int braceIndex = manifestContent.IndexOf("{", dependenciesIndex, StringComparison.Ordinal);
-                if (braceIndex == -1) return manifestContent;
-
-                string newEntry = $"\n    \"{packageName}\": \"{newSource}\",";
-                return manifestContent.Insert(braceIndex + 1, newEntry);
+                int insertAt = dep.Index + dep.Length;
+                int probe = insertAt;
+                while (probe < manifestContent.Length && char.IsWhiteSpace(manifestContent[probe])) probe++;
+                bool emptyDeps = probe < manifestContent.Length && manifestContent[probe] == '}';
+                // 빈 dependencies에 트레일링 콤마를 남기면 manifest 전체 파싱이 깨져 모든 패키지 로드가 실패함
+                string newEntry = emptyDeps
+                    ? $"\n    \"{packageName}\": \"{newSource}\"\n  "
+                    : $"\n    \"{packageName}\": \"{newSource}\",";
+                return manifestContent.Insert(insertAt, newEntry);
             }
 
-            startIndex += pattern.Length;
-            int endIndex = manifestContent.IndexOf("\"", startIndex, StringComparison.Ordinal);
-            if (endIndex == -1) return manifestContent;
-
-            return manifestContent.Substring(0, startIndex) + newSource + manifestContent.Substring(endIndex);
+            var g = m.Groups[1];
+            return manifestContent.Substring(0, g.Index) + newSource + manifestContent.Substring(g.Index + g.Length);
         }
 
         private void UpdateStep1Summary(string packageName)
@@ -2073,17 +2120,17 @@ namespace TelleR
                 return;
             }
 
-            string json = $@"{{
-  ""name"": ""{packageNameField.value}"",
-  ""version"": ""{versionField.value}"",
-  ""displayName"": ""{displayNameField.value}"",
-  ""description"": ""{descriptionField.value}"",
-  ""unity"": ""{unityVersionField.value}"",
-  ""author"": {{
-    ""name"": ""{authorField.value}""
-  }},
-  ""keywords"": []
-}}";
+            // JsonUtility로 직렬화해 따옴표·역슬래시 입력 시에도 JSON이 깨지지 않게 함
+            var pkg = new PackageJson
+            {
+                name = packageNameField.value,
+                version = versionField.value,
+                displayName = displayNameField.value,
+                description = descriptionField.value,
+                unity = unityVersionField.value,
+                author = new Author { name = authorField.value },
+            };
+            string json = JsonUtility.ToJson(pkg, true);
             string path = Path.Combine(currentPackagePath, "package.json");
             File.WriteAllText(path, json);
 
@@ -2168,7 +2215,28 @@ namespace TelleR
             if (!File.Exists(path)) return;
 
             string runtimeAsmName = ConvertToAsmdefName(packageNameField.value);
-            File.WriteAllText(path, $"{{\n  \"name\": \"{asmName}\",\n  \"rootNamespace\": \"{ConvertToNamespace(packageNameField.value)}\",\n  \"includePlatforms\": [\"Editor\"],\n  \"excludePlatforms\": [],\n  \"references\": [\"{runtimeAsmName}\"]\n}}");
+            // 통째 재작성하면 사용자가 손으로 추가한 references·defineConstraints 등이 소실되므로
+            // runtime 참조가 없을 때만 references 배열에 삽입한다.
+            string content = File.ReadAllText(path);
+            if (!content.Contains($"\"{runtimeAsmName}\""))
+            {
+                var refs = Regex.Match(content, "\"references\"\\s*:\\s*\\[");
+                if (refs.Success)
+                {
+                    int insertAt = refs.Index + refs.Length;
+                    int probe = insertAt;
+                    while (probe < content.Length && char.IsWhiteSpace(content[probe])) probe++;
+                    bool emptyRefs = probe < content.Length && content[probe] == ']';
+                    content = content.Insert(insertAt, emptyRefs ? $"\"{runtimeAsmName}\"" : $"\"{runtimeAsmName}\", ");
+                }
+                else
+                {
+                    int lastBrace = content.LastIndexOf('}');
+                    if (lastBrace < 0) return;
+                    content = content.Insert(lastBrace, $",\n  \"references\": [\"{runtimeAsmName}\"]\n");
+                }
+                File.WriteAllText(path, content);
+            }
 
             if (!File.Exists(path + ".meta")) CreateAsmdefMeta(path);
         }
@@ -2194,6 +2262,9 @@ namespace TelleR
         {
             string sourceMeta = sourceFullPath + ".meta";
             string destMeta = destFilePath + ".meta";
+
+            // 같은 파일 재추가(덮어쓰기) 시 기존 GUID를 유지해 패키지 내 참조가 깨지지 않게 함
+            if (File.Exists(destMeta)) return;
 
             if (File.Exists(sourceMeta))
             {
@@ -2333,7 +2404,15 @@ namespace TelleR
         private string NormalizeFeatureName(string value)
         {
             if (value == null) return "";
-            return value.Trim().Replace(" ", "");
+            string name = value.Trim().Replace(" ", "");
+            if (name.Length == 0 || name.Contains("..")) return "";
+            foreach (char c in name)
+                if (c == '/' || c == '\\' || Array.IndexOf(Path.GetInvalidFileNameChars(), c) >= 0) return "";
+            // 구조 폴더명은 금지 — "Resources"를 기능명으로 쓰면 삭제 시 리소스 루트 전체가 지워짐
+            if (name.Equals("Resources", StringComparison.OrdinalIgnoreCase) ||
+                name.Equals("Editor", StringComparison.OrdinalIgnoreCase) ||
+                name.Equals("Runtime", StringComparison.OrdinalIgnoreCase)) return "";
+            return name;
         }
 
         // ─── Data Classes ───
@@ -2347,6 +2426,7 @@ namespace TelleR
             public string description;
             public string unity;
             public Author author;
+            public string[] keywords = new string[0];
         }
 
         [Serializable]

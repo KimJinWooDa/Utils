@@ -197,23 +197,28 @@ namespace TelleR
             var allTrails = root.GetComponentsInChildren<TrailEffect>();
             if (allTrails.Length <= 1) return;
 
-            TrailEffect parent = null;
-            foreach (var trail in allTrails)
+            // 사용자가 명시적으로 지정한 병합 대상은 유지하고 재등록만 한다
+            if (MergeWithTrail != null && MergeWithTrail != this)
             {
-                if (trail == this) continue;
-                if (trail.MergeWithTrail == null)
-                {
-                    parent = trail;
-                    break;
-                }
+                MergeWithTrail.AddChild(this);
+                return;
             }
 
-            if (parent != null && parent != this)
-            {
-                MergeWithTrail = parent;
-                parent.AddChild(this);
-            }
+            // 계층 순서상 첫 번째 트레일을 그룹의 단일 루트로 삼는다.
+            // "MergeWithTrail이 null인 첫 트레일"을 고르면 활성화 순서에 따라 체인(A→B→C)이 만들어지고,
+            // 체인 중간 노드는 LateUpdate에서 조기 return하므로 그 자식 트레일이 그려지지 않는다.
+            TrailEffect canonical = allTrails[0];
+            if (canonical == this) return;
+
+            MergeWithTrail = canonical;
+            canonical.AddChild(this);
         }
+
+        // 병합 부모가 실제로 자식을 그려줄 수 있는 상태인지 (Stamp+Follow 모드는 DrawChildren을 타지 않음)
+        bool CanDrawChildren =>
+            initialized && Active &&
+            !(EffMode == TrailMode.TextureStamp && EffStampStyle == StampStyle.Follow) &&
+            MergeWithTrail == null;
 
         void OnDisable()
         {
@@ -237,7 +242,8 @@ namespace TelleR
             {
                 CaptureSnapshot(time);
 
-                if (MergeWithTrail != null && MergeWithTrail.initialized) return;
+                // 부모가 실제로 자식을 그려줄 수 있을 때만 위임 — 아니면 스스로 그린다 (미출력 방지)
+                if (MergeWithTrail != null && MergeWithTrail.CanDrawChildren) return;
 
                 DrawSelf(time);
                 DrawChildren(time);
@@ -286,7 +292,8 @@ namespace TelleR
             float sizeEnd = EffStampSizeEnd;
             Color baseColor = EffColor;
             Gradient gradient = EffGradient;
-            bool useGradient = EffColorMode == TrailColorMode.Gradient;
+            // 런타임 AddComponent/프로필 적용 시 gradient가 null일 수 있음 (Reset()은 에디터 전용)
+            bool useGradient = EffColorMode == TrailColorMode.Gradient && gradient != null;
             int layer = gameObject.layer;
 
             Camera cam = GetRenderCamera();
@@ -370,10 +377,13 @@ namespace TelleR
             lastSnapshotTime = -1f;
             lastSnapshotPos = transform.position;
 
-            instMatrices = new Matrix4x4[max];
-            instanceDataCpu = new GpuInstanceData[max];
+            // Stamp(Follow) 모드는 같은 버퍼에 최대 10개(stampPositions 크기)를 기록하므로
+            // MaxSnapshots가 그보다 작아도 버퍼가 모자라지 않게 크기를 보장한다 (미보장 시 매 프레임 IndexOutOfRange)
+            int bufferSize = Mathf.Max(max, 10);
+            instMatrices = new Matrix4x4[bufferSize];
+            instanceDataCpu = new GpuInstanceData[bufferSize];
 
-            sortBuffer = new SortEntry[max];
+            sortBuffer = new SortEntry[bufferSize];
             sortCount = 0;
 
             stampPositions = new Vector3[10];
@@ -383,7 +393,7 @@ namespace TelleR
             stencilId = EffPreventOverlap ? (nextStencilId++ % 255 + 1) : 0;
 
             instanceBuffer = new GraphicsBuffer(
-                GraphicsBuffer.Target.Structured, max, GpuInstanceStride);
+                GraphicsBuffer.Target.Structured, bufferSize, GpuInstanceStride);
 
             SetupRuntimeMaterial();
             initialized = true;
@@ -611,7 +621,7 @@ namespace TelleR
             float fresnelI = isStamp ? 0f : EffFresnelIntensity;
             int max = snapshots.Length;
             int layer = gameObject.layer;
-            bool useGradient = EffColorMode == TrailColorMode.Gradient;
+            bool useGradient = EffColorMode == TrailColorMode.Gradient && gradient != null;
 
             float scaleS, scaleE;
             if (isStamp)

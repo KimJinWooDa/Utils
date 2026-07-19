@@ -83,7 +83,18 @@ namespace TelleR
 
             if (lastCheckedFrame < 0)
             {
+                // 첫 검사 틱: baseline만 잡으면 시작 프레임(0 등)에 놓인 이벤트가 영구 미발사되므로
+                // 현재 프레임과 정확히 일치하는 이벤트는 즉시 발사한다
                 lastCheckedFrame = currentFrame;
+                for (int i = 0; i < events.Count; i++)
+                {
+                    var ev = events[i];
+                    if (!ev.FiredThisCycle && ev.Frame == currentFrame)
+                    {
+                        ev.FiredThisCycle = true;
+                        ev.OnTriggered?.Invoke();
+                    }
+                }
                 return;
             }
 
@@ -97,19 +108,18 @@ namespace TelleR
 
                 bool shouldFire = false;
 
+                // 진행 방향과 반대로 프레임이 움직인 경우는 루프 wrap이 아니라 블렌드 전환·seek로 인한
+                // 역행이다 — wrap으로 추론해 발사하면 전환 순간 등록 이벤트가 연쇄 오발사된다.
+                // 실제 루프 wrap은 ResetCycle() 신호(OnLoopWrapped)로 처리된다.
                 if (!reverse)
                 {
                     if (from < to)
                         shouldFire = ev.Frame > from && ev.Frame <= to;
-                    else if (from > to)
-                        shouldFire = ev.Frame > from || ev.Frame <= to;
                 }
                 else
                 {
                     if (from > to)
                         shouldFire = ev.Frame < from && ev.Frame >= to;
-                    else if (from < to)
-                        shouldFire = ev.Frame < from || ev.Frame >= to;
                 }
 
                 if (shouldFire)

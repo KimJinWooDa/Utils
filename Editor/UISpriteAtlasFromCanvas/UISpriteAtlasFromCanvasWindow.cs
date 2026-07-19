@@ -133,9 +133,23 @@ namespace TelleR
             HashSet<Sprite> sprites = CollectSpritesFromEntries(entries);
             Object[] packables = ToObjectArray(sprites);
 
+            if (packables.Length == 0)
+            {
+                // 도메인 리로드로 목록이 비워진 상태에서 Build를 누르면 기존 아틀라스가 빈 깡통이 되는 사고 방지
+                EditorUtility.DisplayDialog("UI Atlas Builder",
+                    "수집된 스프라이트가 없습니다.\n(Drop 목록은 도메인 리로드/플레이 진입 시 초기화됩니다 — 다시 드롭해 주세요)", "OK");
+                return;
+            }
+
             Object[] existing = SpriteAtlasExtensions.GetPackables(atlas);
             if (existing != null && existing.Length > 0)
+            {
+                if (!EditorUtility.DisplayDialog("UI Atlas Builder",
+                    $"'{Path.GetFileName(path)}'의 기존 packable {existing.Length}개를 현재 목록 {packables.Length}개로 교체합니다.\n계속할까요?",
+                    "교체", "취소"))
+                    return;
                 SpriteAtlasExtensions.Remove(atlas, existing);
+            }
 
             if (packables.Length > 0)
                 SpriteAtlasExtensions.Add(atlas, packables);

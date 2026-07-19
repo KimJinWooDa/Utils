@@ -17,6 +17,7 @@ namespace TelleR
         }
 
         public event Action OnAnimationComplete;
+        public event Action OnLoopWrapped;
         public event Action<string, int, float, float> OnStateTransitionRequested;
 
         private readonly AnimationPlaybackCore core;
@@ -55,8 +56,8 @@ namespace TelleR
                 if (timerValue < t.Delay) continue;
 
                 triggeredTransitions.Add(i);
-                float speed = t.Speed <= 0f ? 1f : t.Speed;
-                OnStateTransitionRequested?.Invoke(t.TargetState, t.Layer, speed, t.BlendDuration);
+                // Speed<=0은 "현재 재생 속도 유지" 의미로 그대로 전달 (1로 강제하면 사용자의 속도 설정이 매 전환마다 1로 덮임)
+                OnStateTransitionRequested?.Invoke(t.TargetState, t.Layer, t.Speed, t.BlendDuration);
             }
         }
 
@@ -74,10 +75,18 @@ namespace TelleR
 
             if (loop)
             {
-                if (!reverse && frame > endFrame)
+                // frame은 [0, MaxFrame]으로 클램프되므로 '>'는 endFrame==MaxFrame(기본값)에서 절대 참이 될 수 없음
+                // — '>=' 비교여야 루프가 실제로 wrap된다
+                if (!reverse && frame >= endFrame && startFrame < endFrame)
+                {
                     core.JumpToFrame(startFrame);
-                else if (reverse && frame < startFrame)
+                    OnLoopWrapped?.Invoke();
+                }
+                else if (reverse && frame <= startFrame && startFrame < endFrame)
+                {
                     core.JumpToFrame(endFrame);
+                    OnLoopWrapped?.Invoke();
+                }
                 return;
             }
 
@@ -101,6 +110,13 @@ namespace TelleR
             timerValue = 0f;
             activeTag = tag ?? "";
             triggeredTransitions.Clear();
+            completed = false; // 리셋하지 않으면 클립 전환 후 OnAnimationComplete가 다시는 발사되지 않음
+        }
+
+        // 클립 교체 경로에서 완료 상태를 리셋하기 위한 공개 API
+        public void ResetCompletion()
+        {
+            completed = false;
         }
 
         public void Pause()

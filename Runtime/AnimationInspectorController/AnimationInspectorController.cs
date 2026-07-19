@@ -144,6 +144,8 @@ namespace TelleR
                 transitionSystem = new AnimationTransitionSystem(core, autoTransitions);
                 transitionSystem.OnAnimationComplete += () => OnAnimationComplete?.Invoke();
                 transitionSystem.OnStateTransitionRequested += HandleStateTransition;
+                // 루프 wrap 시 프레임 이벤트를 재장전해야 2바퀴째부터도 이벤트가 발사됨
+                transitionSystem.OnLoopWrapped += () => frameEvents.ResetCycle();
             }
 
             if (animator && clip)
@@ -213,7 +215,27 @@ namespace TelleR
                 }
             }
 
-            if (targetInfo?.Clip == null) return;
+            if (targetInfo == null)
+            {
+                // 빌드에서는 AnimatorController 접근이 불가해 StateName이 클립명으로 폴백됨 —
+                // State명 매칭 실패 시 클립명으로 재시도해야 빌드에서도 자동 전환이 동작한다
+                for (int i = 0; i < count; i++)
+                {
+                    var info = clipInfos[i];
+                    if (info.Clip != null && info.Clip.name == targetState)
+                    {
+                        targetInfo = info;
+                        break;
+                    }
+                }
+            }
+
+            if (targetInfo?.Clip == null)
+            {
+                Debug.LogWarning($"[AnimationInspectorController] 전환 대상 '{targetState}'를 찾지 못해 자동 전환을 건너뜁니다. " +
+                                 "(빌드에서는 State명이 클립명으로 대체되므로 State명과 클립명이 다르면 매칭에 실패할 수 있습니다)");
+                return;
+            }
 
             PerformTransition(targetInfo, blendDuration, speed);
         }
@@ -242,6 +264,7 @@ namespace TelleR
             }
 
             frameEvents.ResetCycle();
+            transitionSystem?.ResetCompletion();
         }
 
         private void ChangeClipImmediate(AnimationClip newClip, bool wasPlaying, float overrideSpeed)
@@ -263,6 +286,7 @@ namespace TelleR
             }
 
             frameEvents.ResetCycle();
+            transitionSystem?.ResetCompletion();
         }
 
         public void Play()

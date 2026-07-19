@@ -62,6 +62,12 @@ namespace TelleR.Util.FastClone
 
         public static void CreateNextClone(System.Action onComplete)
         {
+            if (currentProcess != null)
+            {
+                EditorUtility.DisplayDialog("Fast Clone", "이미 클론 생성이 진행 중입니다.", "OK");
+                return;
+            }
+
             string sourcePath = GetCurrentProjectPath();
             string targetPath = "";
 
@@ -192,14 +198,35 @@ namespace TelleR.Util.FastClone
         {
             if (!Directory.Exists(path)) return;
 
+            // 다른 Unity 인스턴스로 열려 있는 클론을 지우면 잠긴 파일이 부분 삭제되어 수 GB 잔해가 남음
+            if (File.Exists(Path.Combine(path, "Temp", "UnityLockfile")))
+            {
+                EditorUtility.DisplayDialog("Fast Clone",
+                    "이 클론은 다른 Unity 인스턴스에서 열려 있는 것 같습니다.\n닫은 뒤 다시 삭제하세요.\n" +
+                    "(닫았는데도 이 메시지가 나오면 크래시 잔여 잠금이므로 폴더를 직접 삭제하세요)", "OK");
+                return;
+            }
+
             EditorUtility.DisplayProgressBar("Fast Clone", "Deleting...", 1.0f);
+            try
+            {
+                int exitCode;
+                if (Application.platform == RuntimePlatform.WindowsEditor)
+                    exitCode = RunCommand("cmd.exe", $"/c rmdir /s /q \"{path}\"");
+                else
+                    exitCode = RunCommand("/bin/bash", $"-c \"rm -rf '{path}'\"");
 
-            if (Application.platform == RuntimePlatform.WindowsEditor)
-                RunCommand("cmd.exe", $"/c rmdir /s /q \"{path}\"");
-            else
-                RunCommand("/bin/bash", $"-c \"rm -rf '{path}'\"");
-
-            EditorUtility.ClearProgressBar();
+                // rmdir 종료 코드보다 실제 폴더 존재 여부가 신뢰할 수 있는 판정 기준
+                if (Directory.Exists(path))
+                {
+                    EditorUtility.DisplayDialog("Fast Clone",
+                        $"클론 삭제가 완료되지 않았습니다 (exit code {exitCode}).\n잠긴 파일을 확인한 뒤 다시 시도하세요:\n{path}", "OK");
+                }
+            }
+            finally
+            {
+                EditorUtility.ClearProgressBar();
+            }
         }
 
         private static void LinkFolder(string sourceRoot, string targetRoot, string folderName)

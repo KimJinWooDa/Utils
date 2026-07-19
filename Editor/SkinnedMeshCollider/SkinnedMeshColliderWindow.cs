@@ -36,7 +36,6 @@ namespace TelleR
         private float quality = 0.5f;
         private int targetTriCount;
         private int originalTriCount;
-        private bool preserveBorderEdges = false;
         private bool recalculateNormals = true;
 
         private readonly float[] presetValues = { 0.1f, 0.25f, 0.5f, 0.75f, 0.9f };
@@ -383,11 +382,13 @@ namespace TelleR
 
             EditorGUILayout.BeginHorizontal();
             replaceExistingColliders =
-                EditorGUILayout.ToggleLeft("기존 콜라이더 교체", replaceExistingColliders, GUILayout.Width(140));
+                EditorGUILayout.ToggleLeft("기존 MeshCollider 교체", replaceExistingColliders, GUILayout.Width(140));
             makeConvex = EditorGUILayout.ToggleLeft("Convex (Rigidbody용)", makeConvex);
             EditorGUILayout.EndHorizontal();
 
-            EditorGUILayout.Space(10);
+            EditorGUILayout.Space(5);
+            EditorGUILayout.HelpBox("현재 포즈 기준으로 베이크됩니다. 바인드 포즈가 필요하면 애니메이션 프리뷰를 끄고 실행하세요.", MessageType.None);
+            EditorGUILayout.Space(5);
 
             GUI.backgroundColor = new Color(0.3f, 0.7f, 0.3f);
             if (GUILayout.Button("MeshCollider 생성", GUILayout.Height(32)))
@@ -476,7 +477,7 @@ namespace TelleR
             {
                 bakedMesh = new Mesh();
                 bakedMesh.name = "Preview";
-                selectedRenderer.BakeMesh(bakedMesh);
+                selectedRenderer.BakeMesh(bakedMesh, true);
                 bakedMesh.RecalculateBounds();
                 bakedMesh.RecalculateNormals();
             }
@@ -515,7 +516,9 @@ namespace TelleR
                 if (smr == null || smr.sharedMesh == null) continue;
 
                 Mesh bakedMesh = new Mesh();
-                smr.BakeMesh(bakedMesh);
+                // useScale:true — 기본값(false)은 본 체인 스케일이 정점에 남아 스케일된 캐릭터에서
+                // 콜라이더가 스케일 제곱 크기가 됨
+                smr.BakeMesh(bakedMesh, true);
 
                 CombineInstance ci = new CombineInstance();
                 ci.mesh = bakedMesh;
@@ -692,7 +695,8 @@ namespace TelleR
 
                 if (replaceExistingColliders)
                 {
-                    var existingColliders = colliderTarget.GetComponents<Collider>();
+                    // MeshCollider만 교체 — Collider 전체를 지우면 CharacterController·WheelCollider까지 파괴됨
+                    var existingColliders = colliderTarget.GetComponents<MeshCollider>();
                     foreach (var col in existingColliders)
                     {
                         Undo.DestroyObjectImmediate(col);
@@ -727,19 +731,27 @@ namespace TelleR
                 return;
             }
 
-            Mesh bakedMesh = combineAllMeshes ? BakeAllMeshes() : BakeSingleMesh();
-
-            if (bakedMesh != null)
+            try
             {
-                Selection.activeObject = bakedMesh;
-                EditorGUIUtility.PingObject(bakedMesh);
+                Mesh bakedMesh = combineAllMeshes ? BakeAllMeshes() : BakeSingleMesh();
 
-                EditorUtility.DisplayDialog(
-                    "완료!",
-                    $"메시 저장 완료\n\n" +
-                    $"경로: {saveFolderPath}/{meshName}.asset\n" +
-                    $"Triangles: {bakedMesh.triangles.Length / 3:N0}",
-                    "OK");
+                if (bakedMesh != null)
+                {
+                    Selection.activeObject = bakedMesh;
+                    EditorGUIUtility.PingObject(bakedMesh);
+
+                    EditorUtility.DisplayDialog(
+                        "완료!",
+                        $"메시 저장 완료\n\n" +
+                        $"경로: {AssetDatabase.GetAssetPath(bakedMesh)}\n" +
+                        $"Triangles: {bakedMesh.triangles.Length / 3:N0}",
+                        "OK");
+                }
+            }
+            catch (System.Exception e)
+            {
+                EditorUtility.DisplayDialog("Error", $"실패:\n{e.Message}", "OK");
+                Debug.LogError($"[SkinnedMeshCollider] {e}");
             }
         }
 
@@ -753,7 +765,18 @@ namespace TelleR
 
             Mesh bakedMesh = new Mesh();
             bakedMesh.name = meshName;
-            selectedRenderer.BakeMesh(bakedMesh);
+            selectedRenderer.BakeMesh(bakedMesh, true);
+
+            // 콜라이더가 붙는 대상(targetObject/루트) 공간으로 정점 변환 — 콤바인 경로와 동일한 보정.
+            // 없으면 렌더러가 루트와 위치/회전이 다른 리그에서 콜라이더가 어긋남.
+            Transform space = targetObject != null ? targetObject.transform : selectedRenderer.transform.root;
+            Matrix4x4 toSpace = space.worldToLocalMatrix * selectedRenderer.transform.localToWorldMatrix;
+            if (toSpace != Matrix4x4.identity)
+            {
+                Vector3[] verts = bakedMesh.vertices;
+                for (int i = 0; i < verts.Length; i++) verts[i] = toSpace.MultiplyPoint3x4(verts[i]);
+                bakedMesh.vertices = verts;
+            }
             bakedMesh.RecalculateBounds();
             bakedMesh.RecalculateNormals();
 
@@ -804,20 +827,28 @@ namespace TelleR
                 AssetDatabase.Refresh();
             }
 
-            string meshPath = $"{saveFolderPath}/{meshName}.asset";
+            string safeName = string.Join("_", meshName.Split(Path.GetInvalidFileNameChars()));
+            string meshPath = $"{saveFolderPath}/{safeName}.asset";
 
             var existingMesh = AssetDatabase.LoadAssetAtPath<Mesh>(meshPath);
             if (existingMesh != null)
             {
                 if (!EditorUtility.DisplayDialog(
                         "덮어쓰기?",
-                        $"'{meshName}.asset' 파일이 이미 존재합니다.\n덮어쓰시겠습니까?",
+                        $"'{safeName}.asset' 파일이 이미 존재합니다.\n내용을 교체하시겠습니까? (이 에셋을 쓰는 기존 참조는 유지됩니다)",
                         "예", "아니오"))
                 {
+                    DestroyImmediate(mesh); // 취소 시 임시 메시 누수 방지
                     return null;
                 }
 
-                AssetDatabase.DeleteAsset(meshPath);
+                // DeleteAsset + CreateAsset은 GUID가 바뀌어 기존 씬/프리팹 참조가 전부 Missing이 됨.
+                // 내용만 교체해 GUID를 보존한다.
+                existingMesh.Clear();
+                EditorUtility.CopySerialized(mesh, existingMesh);
+                DestroyImmediate(mesh);
+                AssetDatabase.SaveAssets();
+                return existingMesh;
             }
 
             AssetDatabase.CreateAsset(mesh, meshPath);

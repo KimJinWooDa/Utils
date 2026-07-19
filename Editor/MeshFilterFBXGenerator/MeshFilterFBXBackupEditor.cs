@@ -109,6 +109,10 @@ namespace TelleR
             string assetPath = AssetDatabase.GetAssetPath(mesh);
             if (HasFBXBackup(assetPath)) return;
 
+            // 내장 프리미티브(큐브 등)는 재임포트 유실 대상이 아니므로 경고를 띄우지 않음
+            if (!string.IsNullOrEmpty(assetPath) &&
+                (assetPath.Contains("unity default resources") || assetPath.Contains("unity_builtin_extra"))) return;
+
             using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
             {
                 using (new EditorGUILayout.HorizontalScope())
@@ -139,6 +143,23 @@ namespace TelleR
         private static void CreateFBXBackup(Mesh mesh, GameObject go, bool isSkinned)
         {
 #if UNITY_EDITOR
+            bool replaceMesh = false;
+            if (isSkinned)
+            {
+                // SMR은 스켈레톤이 FBX에 포함된다는 보장이 없고 본 순서·bindpose 정합성을 검증할 수 없어
+                // 참조 교체 없이 백업 파일만 생성한다 (교체 시 캐릭터 렌더링이 파손될 수 있음).
+                replaceMesh = false;
+            }
+            else
+            {
+                int choice = EditorUtility.DisplayDialogComplex("FBX Backup",
+                    "FBX 백업 파일을 생성합니다.\n\n생성 후 현재 메시 참조를 FBX 메시로 교체할 수도 있습니다.\n" +
+                    "(교체 시 정점 순서·노말·정밀도가 원본과 달라질 수 있습니다)",
+                    "백업 + 교체", "취소", "백업만");
+                if (choice == 1) return;
+                replaceMesh = choice == 0;
+            }
+
             if (!Directory.Exists(DefaultFBXFolder))
             {
                 Directory.CreateDirectory(DefaultFBXFolder);
@@ -162,23 +183,17 @@ namespace TelleR
                     importer.SaveAndReimport();
                 }
 
-                GameObject fbxAsset = AssetDatabase.LoadAssetAtPath<GameObject>(fbxPath);
-                Mesh fbxMesh = FindMeshInAsset(fbxPath);
-
-                if (fbxMesh != null)
+                if (!replaceMesh)
                 {
-                    Undo.RecordObject(go, "Replace Mesh with FBX");
+                    Debug.Log("FBX backup created (참조 교체 없음): " + fbxPath);
+                }
+                else
+                {
+                    // 계층에 메시가 여러 개일 수 있으므로 반드시 이름으로 매칭 — 첫 메시를 무조건 쓰면
+                    // 엉뚱한 자식 메시로 교체될 수 있음
+                    Mesh fbxMesh = FindMeshInAsset(fbxPath, mesh.name);
 
-                    if (isSkinned)
-                    {
-                        SkinnedMeshRenderer smr = go.GetComponent<SkinnedMeshRenderer>();
-                        if (smr != null)
-                        {
-                            Undo.RecordObject(smr, "Replace Mesh with FBX");
-                            smr.sharedMesh = fbxMesh;
-                        }
-                    }
-                    else
+                    if (fbxMesh != null)
                     {
                         MeshFilter mf = go.GetComponent<MeshFilter>();
                         if (mf != null)
@@ -186,14 +201,14 @@ namespace TelleR
                             Undo.RecordObject(mf, "Replace Mesh with FBX");
                             mf.sharedMesh = fbxMesh;
                         }
-                    }
 
-                    EditorUtility.SetDirty(go);
-                    Debug.Log("FBX backup created and applied: " + fbxPath);
-                }
-                else
-                {
-                    Debug.LogWarning("FBX created but mesh not found in asset: " + fbxPath);
+                        EditorUtility.SetDirty(go);
+                        Debug.Log("FBX backup created and applied: " + fbxPath);
+                    }
+                    else
+                    {
+                        Debug.LogWarning($"FBX는 생성했지만 '{mesh.name}'과 일치하는 메시를 찾지 못해 참조 교체를 생략했습니다: {fbxPath}");
+                    }
                 }
             }
             else
@@ -249,17 +264,22 @@ namespace TelleR
             return false;
         }
 
-        private static Mesh FindMeshInAsset(string assetPath)
+        private static Mesh FindMeshInAsset(string assetPath, string meshName)
         {
             Object[] assets = AssetDatabase.LoadAllAssetsAtPath(assetPath);
+            Mesh firstMesh = null;
+            int meshCount = 0;
             foreach (Object asset in assets)
             {
                 if (asset is Mesh mesh)
                 {
-                    return mesh;
+                    if (mesh.name == meshName) return mesh;
+                    if (firstMesh == null) firstMesh = mesh;
+                    meshCount++;
                 }
             }
-            return null;
+            // 이름 매칭 실패 시 메시가 정확히 1개일 때만 그 메시를 신뢰
+            return meshCount == 1 ? firstMesh : null;
         }
 
         private static string SanitizeFileName(string name)

@@ -445,7 +445,8 @@ namespace TelleR
         {
             Vector3 worldCenter = script.transform.TransformPoint(script.VolumeCenter);
             Handles.BeginGUI();
-            Vector3 screenPos = HandleUtility.WorldToGUIPoint(worldCenter);
+            // WorldToGUIPoint는 Vector2를 반환해 z가 항상 0 — 기존 z>0 판정으로는 라벨이 절대 그려지지 않았음
+            Vector3 screenPos = HandleUtility.WorldToGUIPointWithDepth(worldCenter);
             if (screenPos.z > 0f)
             {
                 GUIStyle style = new GUIStyle(EditorStyles.label);

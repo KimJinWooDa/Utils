@@ -274,6 +274,7 @@ namespace TelleR
                 {
                     foreach (var layer in controller.layers)
                     {
+                        if (layer.stateMachine == null) continue; // Synced Layer는 stateMachine이 null
                         foreach (var child in layer.stateMachine.states)
                             states.Add(child.state.name);
                     }
@@ -616,11 +617,9 @@ namespace TelleR
             transitionPage = 0;
             UpdateCurrentClipIndex();
 
-            // 선택 후 바로 0프레임 샘플링
+            // 선택 후 바로 0프레임 샘플링 — 재생은 Play 버튼으로 (목록을 훑기만 해도
+            // 씬 오브젝트가 움직이기 시작하는 부수효과 제거)
             SampleCurrentFrame();
-
-            // 자동 재생
-            EditorPlay();
         }
 
         private void FrameStateInAnimator(ClipCatalog.ClipInfo info)
@@ -631,6 +630,9 @@ namespace TelleR
         private void DrawTabWorkspace()
         {
             DrawPreviewControlsSection();
+
+            if (isAnimationModeActive && !Application.isPlaying)
+                EditorGUILayout.HelpBox("프리뷰 포즈가 씬에 표시 중입니다 — 선택을 해제하면 원래 포즈로 복구됩니다.", MessageType.None);
 
             GUILayout.Space(6);
 
@@ -730,6 +732,10 @@ namespace TelleR
         private void EditorPlay()
         {
             if (ctrl == null || ctrl.CurrentClip == null) return;
+
+            // 비루프 완주로 마지막 프레임에 멈춘 상태에서 Play 시 즉시 재정지하지 않도록 되감기
+            if (editorPlayState == EditorPlayState.Stopped && editorCurrentFrame >= GetMaxFrame())
+                editorCurrentFrame = 0;
 
             editorPlayState = EditorPlayState.Playing;
             lastEditorTime = EditorApplication.timeSinceStartup;
@@ -1095,13 +1101,31 @@ namespace TelleR
             var layerProp = t.FindPropertyRelative("Layer");
 
             int currentIndex = Array.IndexOf(availableStates, stateProp.stringValue);
-            if (currentIndex < 0) currentIndex = 0;
+            // 저장된 State가 목록에 없어도(rename 등) 값을 덮어쓰지 않고 (missing) 항목으로 표시만 한다
+            bool missingState = currentIndex < 0 && !string.IsNullOrEmpty(stateProp.stringValue);
+            string[] stateOptions = availableStates;
+            if (missingState)
+            {
+                stateOptions = new string[availableStates.Length + 1];
+                stateOptions[0] = $"(missing) {stateProp.stringValue}";
+                Array.Copy(availableStates, 0, stateOptions, 1, availableStates.Length);
+                currentIndex = 0;
+            }
+            else if (currentIndex < 0) currentIndex = 0;
 
             EditorGUILayout.BeginHorizontal();
             EditorGUILayout.PrefixLabel("Target State");
-            int newIndex = EditorGUILayout.Popup(currentIndex, availableStates);
-            if (newIndex >= 0 && newIndex < availableStates.Length)
-                stateProp.stringValue = availableStates[newIndex];
+            EditorGUI.BeginChangeCheck();
+            int newIndex = EditorGUILayout.Popup(currentIndex, stateOptions);
+            if (EditorGUI.EndChangeCheck())
+            {
+                if (missingState)
+                {
+                    if (newIndex > 0) stateProp.stringValue = stateOptions[newIndex];
+                }
+                else if (newIndex >= 0 && newIndex < stateOptions.Length)
+                    stateProp.stringValue = stateOptions[newIndex];
+            }
             EditorGUILayout.EndHorizontal();
 
             tagProp.stringValue = EditorGUILayout.TextField("Tag (Filter)", tagProp.stringValue);
@@ -1346,13 +1370,34 @@ namespace TelleR
             newEvent.FindPropertyRelative("Frame").intValue = frame;
             newEvent.FindPropertyRelative("Label").stringValue = "";
 
+            // arraySize++는 마지막 요소를 복제하므로, 복제된 UnityEvent 리스너를 비워야 함
+            var clonedCalls = newEvent.FindPropertyRelative("OnTriggered.m_PersistentCalls.m_Calls");
+            if (clonedCalls != null) clonedCalls.ClearArray();
+
             serializedObject.ApplyModifiedProperties();
             eventPage = eventsProp.arraySize - 1;
         }
 
         private void SortFrameEvents(SerializedProperty eventsProp)
         {
-            // SerializedProperty 정렬은 복잡하므로 간단히 처리
+            // 남은 구간의 최소 Frame 요소를 MoveArrayElement로 앞으로 끌어오는 선택 정렬
+            // (UnityEvent 리스너를 포함한 요소 전체가 함께 이동)
+            int n = eventsProp.arraySize;
+            for (int i = 0; i < n - 1; i++)
+            {
+                int minIdx = i;
+                int minFrame = eventsProp.GetArrayElementAtIndex(i).FindPropertyRelative("Frame").intValue;
+                for (int j = i + 1; j < n; j++)
+                {
+                    int f = eventsProp.GetArrayElementAtIndex(j).FindPropertyRelative("Frame").intValue;
+                    if (f < minFrame)
+                    {
+                        minFrame = f;
+                        minIdx = j;
+                    }
+                }
+                if (minIdx != i) eventsProp.MoveArrayElement(minIdx, i);
+            }
             serializedObject.ApplyModifiedProperties();
         }
 

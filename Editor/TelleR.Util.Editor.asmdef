@@ -3,5 +3,5 @@
   "rootNamespace": "Teller.Util",
   "includePlatforms": ["Editor"],
   "excludePlatforms": [],
-  "references": ["Teller.Util"]
+  "references": ["Teller.Util", "UnityEngine.UI"]
 }

@@ -38,6 +38,7 @@ namespace TelleR
                 {
                     var layer = controller.layers[layerIdx];
                     var stateMachine = layer.stateMachine;
+                    if (stateMachine == null) continue; // Synced Layer는 stateMachine이 null
 
                     foreach (var state in stateMachine.states)
                     {
@@ -93,6 +94,8 @@ namespace TelleR
 
             foreach (var layer in controller.layers)
             {
+                if (layer.stateMachine == null) continue; // Synced Layer는 stateMachine이 null
+
                 foreach (var transition in layer.stateMachine.anyStateTransitions)
                 {
                     if (transition.destinationState == targetState)

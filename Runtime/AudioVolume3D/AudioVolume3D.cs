@@ -98,7 +98,11 @@ namespace TelleR
         private const float OCCLUSION_CHECK_INTERVAL = 0.1f;
 
         private bool isInitialized;
-        
+        private bool hasStartedPlayback;
+        private bool targetIsFallback;
+        private bool tagSearchFailed;
+        private float nextTargetSearchTime;
+
         private void Awake()
         {
             selfTransform = transform;
@@ -120,7 +124,24 @@ namespace TelleR
         private void OnEnable()
         {
             if (audioSource && !audioSource.isPlaying && PlayOnAwake)
+            {
                 audioSource.Play();
+                hasStartedPlayback = true;
+            }
+        }
+
+        public void Play()
+        {
+            if (!audioSource) return;
+            audioSource.Play();
+            hasStartedPlayback = true;
+        }
+
+        public void Stop()
+        {
+            if (!audioSource) return;
+            audioSource.Stop();
+            hasStartedPlayback = false;
         }
 
         private void OnDisable()
@@ -135,15 +156,37 @@ namespace TelleR
 
         private void InitializeTarget()
         {
-            if (target != null) return;
             if (TargetTransform != null)
             {
                 target = TargetTransform;
+                targetIsFallback = false;
                 return;
             }
-            var go = GameObject.FindGameObjectWithTag(TargetTag);
-            if (go) target = go.transform;
-            else if (Camera.main) target = Camera.main.transform;
+
+            if (!tagSearchFailed)
+            {
+                try
+                {
+                    var go = GameObject.FindGameObjectWithTag(TargetTag);
+                    if (go)
+                    {
+                        target = go.transform;
+                        targetIsFallback = false;
+                        return;
+                    }
+                }
+                catch (UnityException)
+                {
+                    tagSearchFailed = true; // 태그 미정의 — 반복 예외 방지
+                }
+            }
+
+            // 카메라는 임시 폴백 — 이후 태그 대상이 스폰되면 교체된다
+            if (target == null && Camera.main)
+            {
+                target = Camera.main.transform;
+                targetIsFallback = true;
+            }
         }
 
         private void CreateVirtualEmitter()
@@ -162,11 +205,18 @@ namespace TelleR
             audioSource.loop = Loop;
             audioSource.playOnAwake = false;
             audioSource.dopplerLevel = 0f;
+            // 첫 Update의 페이드 계산 전까지 무음 — 기본 volume(1)로 시작하면 씬 시작 시
+            // 원거리 볼륨이 최대 음량으로 터진 뒤 서서히 잦아드는 소리 사고가 남
+            audioSource.volume = 0f;
 
             lowPassFilter = emitterObject.AddComponent<AudioLowPassFilter>();
             lowPassFilter.cutoffFrequency = DEFAULT_CUTOFF;
 
-            if (PlayOnAwake) audioSource.Play();
+            if (PlayOnAwake)
+            {
+                audioSource.Play();
+                hasStartedPlayback = true;
+            }
         }
 
         private void CacheVolumes()
@@ -177,7 +227,15 @@ namespace TelleR
 
         private void Update()
         {
-            if (!audioSource || target == null) return;
+            if (!audioSource) return;
+
+            // 타깃이 없거나 카메라 폴백 상태면 주기적으로 재탐색 — 씬 로드 후 스폰되는 플레이어 대응
+            if ((target == null || targetIsFallback) && Time.time >= nextTargetSearchTime)
+            {
+                nextTargetSearchTime = Time.time + 1f;
+                InitializeTarget();
+            }
+            if (target == null) return;
 
             Vector3 worldCenter = selfTransform.TransformPoint(VolumeCenter);
             float distSqr = (target.position - worldCenter).sqrMagnitude;
@@ -370,7 +428,13 @@ namespace TelleR
             }
             else
             {
-                if (!audioSource.isPlaying) audioSource.UnPause();
+                if (!audioSource.isPlaying)
+                {
+                    // 한 번도 Play되지 않은 소스는 UnPause로 시작되지 않음 — PlayOnAwake=false여도
+                    // 범위에 들어오면 재생이 시작되도록 Play 폴백
+                    if (hasStartedPlayback) audioSource.UnPause();
+                    else { audioSource.Play(); hasStartedPlayback = true; }
+                }
             }
         }
 

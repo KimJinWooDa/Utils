@@ -23,7 +23,7 @@ namespace TelleR.Util.FastClone
             root.style.paddingRight = 15;
 
             bool isClone = FastCloneCore.IsClone();
-            var title = new Label(isClone ? "CLONE PROJECT (Read-Only)" : "ORIGINAL PROJECT");
+            var title = new Label(isClone ? "CLONE PROJECT" : "ORIGINAL PROJECT");
             title.style.fontSize = 18;
             title.style.unityFontStyleAndWeight = FontStyle.Bold;
             title.style.marginBottom = 15;
@@ -34,7 +34,10 @@ namespace TelleR.Util.FastClone
 
             if (isClone)
             {
-                var help = new HelpBox("This is a clone project.\nPlease manage clones from the original project.", HelpBoxMessageType.Warning);
+                var help = new HelpBox(
+                    "이 클론의 Assets / Packages / ProjectSettings는 원본 프로젝트와 정션(심볼릭 링크)으로 공유됩니다.\n" +
+                    "여기서 에셋을 삭제·수정하면 원본 프로젝트에 즉시 반영됩니다 — 읽기 전용 보호는 없습니다.\n" +
+                    "클론 관리는 원본 프로젝트에서 하세요.", HelpBoxMessageType.Warning);
                 root.Add(help);
                 return;
             }
