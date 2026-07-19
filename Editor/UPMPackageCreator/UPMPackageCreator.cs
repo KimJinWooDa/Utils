@@ -2265,7 +2265,11 @@ namespace TelleR
                 if (File.Exists(path))
                 {
                     var old = JsonUtility.FromJson<PackageJson>(SafeReadAllText(path));
-                    if (old != null) pkg.documentationUrl = old.documentationUrl;
+                    if (old != null)
+                    {
+                        pkg.documentationUrl = old.documentationUrl;
+                        pkg.changelogUrl = old.changelogUrl;
+                    }
                 }
             }
             catch { }
@@ -2564,6 +2568,7 @@ namespace TelleR
             public string displayName;
             public string description;
             public string documentationUrl;
+            public string changelogUrl;
             public string unity;
             public Author author;
             public string[] keywords = new string[0];
