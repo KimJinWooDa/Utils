@@ -3,7 +3,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Unity-2021.3+-blue?logo=unity" alt="Unity">
   <img src="https://img.shields.io/badge/License-MIT-green" alt="License">
-  <img src="https://img.shields.io/badge/Version-1.1.0-orange" alt="Version">
+  <img src="https://img.shields.io/badge/Version-1.1.1-orange" alt="Version">
 </p>
 
 <p align="center">

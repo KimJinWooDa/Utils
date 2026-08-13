@@ -2,6 +2,12 @@
 
 TelleR Utilities의 주요 변경 사항을 기록합니다. 형식은 [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/)를 따릅니다.
 
+## [1.1.1] - 2026-08-13
+
+### Fixed
+- **비 VR 프로젝트 설치 실패** — XR 빌트인 모듈(`com.unity.modules.xr`)이 없는 프로젝트에서 `FoveationStarter`가 컴파일 에러를 일으키던 문제. asmdef versionDefines(`TELLER_XR`) 가드를 추가해 XR 모듈이 없어도 패키지 전체가 정상 컴파일됩니다
+- **Unity 2022.2 미만 호환** — `XRDisplaySubsystem.foveatedRenderingLevel`은 Unity 2022.2+ 전용 API라 최소 지원 버전(2021.3)에서 컴파일이 깨지던 문제. 버전 가드를 추가하고, 미지원 환경에서는 경고 로그만 출력합니다
+
 ## [1.1.0] - 2026-07-20
 
 ### Added

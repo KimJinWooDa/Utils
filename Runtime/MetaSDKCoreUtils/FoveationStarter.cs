@@ -1,7 +1,9 @@
+using UnityEngine;
+#if TELLER_XR && UNITY_2022_2_OR_NEWER
 using System.Collections;
 using System.Collections.Generic;
-using UnityEngine;
 using UnityEngine.XR;
+#endif
 
 namespace TelleR
 {
@@ -15,6 +17,7 @@ namespace TelleR
                  "1.0 = High (주변부 최대 해상도 감소, 최고 성능)")]
         private float foveatedRenderingLevel = 1.0f;
 
+#if TELLER_XR && UNITY_2022_2_OR_NEWER
         void Start()
         {
             StartCoroutine(InitializeFoveation());
@@ -39,5 +42,12 @@ namespace TelleR
                 }
             }
         }
+#else
+        // XR 모듈 미포함 프로젝트(비 VR)나 Foveation API가 없는 Unity 2022.2 미만에서도 컴파일되도록 가드 (TELLER_XR은 asmdef versionDefines로 정의됨)
+        void Start()
+        {
+            Debug.LogWarning($"[FoveationStarter] XR 모듈이 없거나 Unity 2022.2 미만이라 Foveated Rendering(레벨 {foveatedRenderingLevel})을 적용하지 않습니다.");
+        }
+#endif
     }
 }

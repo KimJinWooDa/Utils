@@ -12,6 +12,11 @@
       "name": "com.unity.render-pipelines.universal",
       "expression": "",
       "define": "TELLER_URP"
+    },
+    {
+      "name": "com.unity.modules.xr",
+      "expression": "",
+      "define": "TELLER_XR"
     }
   ]
 }
