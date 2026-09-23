@@ -11,6 +11,10 @@ namespace TelleR
         Spiral
     }
 
+    /// <summary>
+    /// 트레일 확인용 테스트 움직임. TrailEffect 인스펙터의 Debug Motion에서 Play Mode 중에만 붙였다 뗀다.
+    /// </summary>
+    [AddComponentMenu("TelleR/Trail Debug Oscillator")]
     public class TrailDebugOscillator : MonoBehaviour
     {
         public DebugMotionPattern Pattern = DebugMotionPattern.UpDown;

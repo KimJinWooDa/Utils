@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Text;
 using UnityEditor;
 using UnityEngine;
 
@@ -9,152 +10,539 @@ namespace TelleR
 {
     public class AutoSpriteSlicerWindow : EditorWindow
     {
-        private static readonly string[] SupportedExtensions = { ".png", ".jpg", ".jpeg", ".tga", ".bmp", ".psd", ".gif", ".hdr", ".exr", ".tif", ".tiff" };
+        [Serializable]
+        private class Entry
+        {
+            public string path;
+            public bool include = true;
 
-        // EXR은 8bit 파이프라인(Color32)에서 HDR 데이터가 파괴되므로 덮어쓰기 대상에서 제외 (임포터 변경만 수행)
-        private enum EncodeFormat { None, Png, Jpg, Tga }
+            // 원본 확인 결과(전체 디코드가 필요)는 직렬화해 도메인 리로드 뒤에도 유지하고, 파일 시각이 바뀐 항목만 다시 읽는다.
+            public bool opaque;              // 원본이 완전 불투명 (배경 제거 시 전면 이미지가 깎일 수 있음)
+            public bool opaqueChecked;
+            public long opaqueStampTicks;    // 확인 당시 파일 수정 시각(UTC ticks)
+            public string sourceError;       // 원본을 읽지 못한 이유 (없으면 비어 있음)
 
-        private List<string> dropPaths = new List<string>();
-        private Vector2 scroll;
+            // 나머지 상태는 임포터·헤더에서 싸게 다시 읽으므로 직렬화하지 않는다.
+            [NonSerialized] public string skipReason;
+            [NonSerialized] public bool isSprite;
+            [NonSerialized] public bool rewritable;   // 원본을 다시 쓸 수 있는 포맷·상태
+            [NonSerialized] public Texture icon;
+            [NonSerialized] public GUIContent label;
+            [NonSerialized] public GUIContent badgeTip;
+            [NonSerialized] public GUIContent errorTip;
 
-        private int _alphaThreshold = 1;
-        private int _padding = 0;
-        private bool _autoDetectKeys = true;
-        private Color _keyColor1 = Color.white;
-        private Color _keyColor2 = new Color(0.8f, 0.8f, 0.8f, 1f);
-        private float _colorTolerance = 0.08f;
-        private int _jpgQuality = 95;
-        private bool _showAdvanced = false;
+            public bool HasSourceError => !string.IsNullOrEmpty(sourceError);
 
-        private string _previewPath;
+            public void ResetSourceCheck()
+            {
+                opaque = false;
+                opaqueChecked = false;
+                opaqueStampTicks = 0;
+                sourceError = string.Empty;
+            }
+        }
+
+        [SerializeField] private List<Entry> _entries = new List<Entry>();
+        [SerializeField] private AutoSpriteSlicer.Settings _settings = new AutoSpriteSlicer.Settings();
+        [SerializeField] private bool _includeNonSpriteInFolders;
+        [SerializeField] private bool _showAdvanced;
+        [SerializeField] private int _selected = -1;
+        [SerializeField] private string _lastReport = string.Empty;
+        [SerializeField] private bool _lastReportHasFailures;
+        [SerializeField] private string _folderNote = string.Empty;
+
+        private Vector2 _scroll;
+        private Vector2 _listScroll;
+        private bool _statusDirty = true;
+
+        // ── 미리보기 캐시: 파일 디코드는 선택이 바뀌거나 파일이 바뀔 때만, 옵션 변경은 캐시된 픽셀로 지연 재계산 ──
+        private string _cachePath;
+        private long _cacheStamp;
+        private AutoSpriteSlicer.DecodedImage _cacheImg;
+        private string _cacheError;
+        private AutoSpriteSlicer.TrimPlan _previewPlan;
+        private string _previewKey;   // 마지막 계산의 (파일, 시각, 픽셀 옵션). 같으면 다시 계산하지 않는다.
         private Texture2D _previewSource;
         private Texture2D _previewResult;
-        private RectInt _previewBounds;
-        private int _previewMaxEdgeAlpha;
-        private string _lastReport = string.Empty;
+        private string _previewNote;
+        private double _previewDue = -1;
+        private const double PreviewDelay = 0.25;
 
-        [MenuItem("Tools/TelleR/Tool/Auto Sprite Slicer")]
+        private const int MaxDialogLines = 12;
+
+        private static readonly GUIContent GcModify = new GUIContent("Modify Image Files", "켜면 PNG/JPG/TGA 원본을 배경 제거·트림 결과로 덮어씁니다. 끄면 파일은 그대로 두고 임포터만 Sprite로 바꿉니다.");
+        private static readonly GUIContent GcRemoveBg = new GUIContent("Remove Background", "네 모서리(또는 지정한 키 색)와 이어진 배경을 투명하게 만듭니다. 자동 키 모드에서는 완전히 불투명한 이미지에만 적용합니다(Opaque 배지). 끄면 투명한 여백만 트림합니다.");
+        private static readonly GUIContent GcBackup = new GUIContent("Backup Originals", "덮어쓰기 전에 원본 파일과 .meta를 프로젝트 루트의 " + AutoSpriteSlicer.BackupRootRelative + " 폴더에 복사합니다. 이 폴더는 .gitignore로 버전 관리에서 제외됩니다.");
+        private static readonly GUIContent GcKeepPivot = new GUIContent("Keep Pivot Position", "이미 Sprite인 텍스처가 트림되면 피벗이 같은 픽셀 위치에 남도록 Custom 피벗으로 옮깁니다. 씬에 배치된 오브젝트가 움직이지 않습니다.");
+        private static readonly GUIContent GcNewPpu = new GUIContent("New Sprite PPU", "새로 Sprite로 바꾸는 텍스처의 Pixels Per Unit. 이미 Sprite인 텍스처는 기존 값을 유지합니다.");
+        private static readonly GUIContent GcNewPivot = new GUIContent("New Sprite Pivot", "새로 Sprite로 바꾸는 텍스처의 피벗. 이미 Sprite인 텍스처는 기존 값을 유지합니다.");
+        private static readonly GUIContent GcCustomPivot = new GUIContent("Custom Pivot", "0~1 정규화 좌표 (0,0 = 왼쪽 아래)");
+        private static readonly GUIContent GcIncludeAll = new GUIContent("Include Non-Sprite Textures From Folders", "끄면 폴더를 드롭할 때 이미 Sprite인 텍스처만 추가합니다. 켜면 Default 타입도 추가합니다. 노멀맵·라이트맵·큐브맵 등은 항상 제외됩니다.");
+        private static readonly GUIContent GcAlpha = new GUIContent("Alpha Threshold", "이 값 이상의 알파를 '불투명'으로 보고 트림 경계를 정합니다.");
+        private static readonly GUIContent GcPadding = new GUIContent("Padding (px)", "잘라낸 영역 주위에 남길 여백");
+        private static readonly GUIContent GcAutoKeys = new GUIContent("Auto Detect Key Colors", "네 모서리의 불투명 픽셀 색을 배경 키로 씁니다.");
+        private static readonly GUIContent GcKey1 = new GUIContent("Key Color 1");
+        private static readonly GUIContent GcKey2 = new GUIContent("Key Color 2");
+        private static readonly GUIContent GcTolerance = new GUIContent("Color Tolerance", "키 색과의 허용 색차 (0~0.5)");
+        private static readonly GUIContent GcJpg = new GUIContent("JPG Quality", "JPG를 트림해 다시 저장할 때의 품질");
+        private static readonly GUIContent GcRemove = new GUIContent("×", "목록에서 제거");
+        private static readonly GUIContent GcOpaqueTip = new GUIContent(string.Empty,
+            "완전히 불투명한 이미지입니다. Remove Background가 켜져 있으면 모서리(키) 색과 이어진 영역을 배경으로 보고 투명하게 만든 뒤 잘라냅니다. " +
+            "전면 배경·패널·타일이라면 체크를 끄세요. 폴더에서 추가된 이런 이미지는 체크가 꺼진 채로 들어옵니다.");
+
+        [MenuItem("Tools/TelleR/Auto Sprite Slicer", false, 120)]
         private static void Open()
         {
             var win = GetWindow<AutoSpriteSlicerWindow>(false, "Auto Sprite Slicer");
-            win.minSize = new Vector2(420, 480);
+            win.minSize = new Vector2(440, 520);
         }
 
-        private void OnDisable() => ClearPreview();
+        private void OnEnable()
+        {
+            if (_entries == null) _entries = new List<Entry>();
+            if (_settings == null) _settings = new AutoSpriteSlicer.Settings();
+            _statusDirty = true;
+            RequestPreview(0);
+        }
+
+        private void OnDisable() => ClearPreviewCache();
+
+        private void OnFocus()
+        {
+            _statusDirty = true;
+            RequestPreview(0); // 바깥에서 파일이 바뀌었을 수 있음 (바뀌지 않았으면 RebuildPreview가 바로 돌아간다)
+        }
+
+        private void Update()
+        {
+            if (_previewDue >= 0 && EditorApplication.timeSinceStartup >= _previewDue)
+            {
+                _previewDue = -1;
+                RebuildPreview();
+                Repaint();
+            }
+        }
 
         private void OnGUI()
         {
-            EditorGUILayout.LabelField("Auto Sprite Slicer", EditorStyles.boldLabel);
-            EditorGUILayout.HelpBox("이미지를 드래그하면 배경 자동 제거 + 트림 + Sprite(Single) 임포트까지 자동 처리합니다.", MessageType.None);
+            if (_statusDirty && Event.current.type == EventType.Layout) RefreshStatuses();
+
+            _scroll = EditorGUILayout.BeginScrollView(_scroll);
+
+            EditorGUILayout.LabelField("Auto Sprite Slicer", TelleRGUI.Header);
+            EditorGUILayout.LabelField("이미지를 넣으면 배경 제거 + 투명 여백 트림 + Sprite(Single) 설정을 한 번에 합니다. " +
+                                       "PNG/JPG/TGA는 원본 파일을 덮어쓰므로 Backup Originals를 켜 두세요.", TelleRGUI.Hint);
 
             DrawDropAndList();
-            EditorGUILayout.Space(6f);
             DrawPreview();
-            EditorGUILayout.Space(6f);
+            DrawOptions();
             DrawActions();
-            EditorGUILayout.Space(4f);
-            DrawAdvanced();
+            DrawReport();
 
-            if (!string.IsNullOrEmpty(_lastReport))
-            {
-                EditorGUILayout.Space(4f);
-                EditorGUILayout.HelpBox(_lastReport, MessageType.Info);
-            }
+            EditorGUILayout.EndScrollView();
         }
 
-        private void DrawAdvanced()
-        {
-            _showAdvanced = EditorGUILayout.Foldout(_showAdvanced, "Advanced", true);
-            if (!_showAdvanced) return;
-            using (new EditorGUI.IndentLevelScope())
-            {
-                EditorGUI.BeginChangeCheck();
-                _alphaThreshold = EditorGUILayout.IntSlider(new GUIContent("Alpha Threshold", "이 값 이상의 알파를 '불투명'으로 간주"), _alphaThreshold, 0, 255);
-                _padding = EditorGUILayout.IntSlider(new GUIContent("Padding (px)", "잘라낸 영역 주위에 추가 여백"), _padding, 0, 64);
-                _autoDetectKeys = EditorGUILayout.Toggle(new GUIContent("Auto Detect Key Colors", "네 모서리 픽셀 색을 배경 키로 사용"), _autoDetectKeys);
-                using (new EditorGUI.DisabledScope(_autoDetectKeys))
-                {
-                    _keyColor1 = EditorGUILayout.ColorField(new GUIContent("Key Color 1"), _keyColor1);
-                    _keyColor2 = EditorGUILayout.ColorField(new GUIContent("Key Color 2"), _keyColor2);
-                }
-                _colorTolerance = EditorGUILayout.Slider(new GUIContent("Color Tolerance", "키 색상과의 허용 색차 (0~1)"), _colorTolerance, 0f, 0.5f);
-                _jpgQuality = EditorGUILayout.IntSlider(new GUIContent("JPG Quality"), _jpgQuality, 50, 100);
-                if (GUILayout.Button("Reset Defaults"))
-                {
-                    _alphaThreshold = 1;
-                    _padding = 0;
-                    _autoDetectKeys = true;
-                    _keyColor1 = Color.white;
-                    _keyColor2 = new Color(0.8f, 0.8f, 0.8f, 1f);
-                    _colorTolerance = 0.08f;
-                    _jpgQuality = 95;
-                    BuildPreview();
-                }
-                if (EditorGUI.EndChangeCheck()) BuildPreview();
-            }
-        }
+        private bool BackgroundRemovalActive => _settings.modifyImageFiles && _settings.removeBackground;
+
+        // ───────── 목록 ─────────
 
         private void DrawDropAndList()
         {
-            var dropRect = GUILayoutUtility.GetRect(0, 64, GUILayout.ExpandWidth(true));
-            GUI.Box(dropRect, "여기에 이미지(또는 폴더)를 드래그\n현재: " + dropPaths.Count + "개", EditorStyles.helpBox);
-            HandleDragAndDrop(dropRect);
+            EditorGUILayout.Space(4f);
+            Rect dropRect = GUILayoutUtility.GetRect(0, 56, GUILayout.ExpandWidth(true));
+            if (TelleRGUI.DropZone(dropRect, "이미지 또는 폴더를 여기로 드래그\n<size=10>현재 " + _entries.Count + "개</size>", out var objs, out _)
+                && objs != null)
+            {
+                AddPathsFromObjects(objs);
+            }
 
             using (new EditorGUILayout.HorizontalScope())
             {
-                if (GUILayout.Button("Add Selected Images/Folders")) AddPathsFromObjects(Selection.objects, true);
-                if (GUILayout.Button("Clear List")) { dropPaths.Clear(); ClearPreview(); }
-            }
-
-            using (new EditorGUILayout.VerticalScope("box"))
-            {
-                EditorGUILayout.LabelField("대상 목록", EditorStyles.boldLabel);
-                scroll = EditorGUILayout.BeginScrollView(scroll, GUILayout.MaxHeight(140));
-                for (int i = 0; i < dropPaths.Count; i++)
+                if (GUILayout.Button("Add Selection")) AddPathsFromObjects(Selection.objects);
+                using (new EditorGUI.DisabledScope(_entries.Count == 0))
                 {
-                    using (new EditorGUILayout.HorizontalScope())
+                    if (GUILayout.Button("Clear List"))
                     {
-                        EditorGUILayout.LabelField(dropPaths[i], GUILayout.ExpandWidth(true));
-                        if (GUILayout.Button("X", GUILayout.Width(28)))
-                        {
-                            dropPaths.RemoveAt(i);
-                            i--;
-                            BuildPreview();
-                        }
+                        _entries.Clear();
+                        _selected = -1;
+                        _folderNote = string.Empty;
+                        RequestPreview(0);
                     }
                 }
-                EditorGUILayout.EndScrollView();
             }
+            _includeNonSpriteInFolders = EditorGUILayout.ToggleLeft(GcIncludeAll, _includeNonSpriteInFolders);
+            if (!string.IsNullOrEmpty(_folderNote)) EditorGUILayout.LabelField(_folderNote, TelleRGUI.Hint);
+
+            TelleRGUI.Section("Targets");
+            if (_entries.Count == 0)
+            {
+                EditorGUILayout.LabelField("목록이 비어 있습니다. 이미지나 폴더를 위 영역에 드래그하세요.", TelleRGUI.HintCentered);
+                return;
+            }
+
+            bool bgActive = BackgroundRemovalActive;
+            int removeAt = -1;
+            _listScroll = EditorGUILayout.BeginScrollView(_listScroll, GUILayout.MaxHeight(180f));
+            for (int i = 0; i < _entries.Count; i++)
+            {
+                Entry e = _entries[i];
+                Rect row = GUILayoutUtility.GetRect(0, 20f, GUILayout.ExpandWidth(true));
+
+                Color bg = i == _selected
+                    ? new Color(TelleRGUI.Accent.r, TelleRGUI.Accent.g, TelleRGUI.Accent.b, 0.25f)
+                    : (i % 2 == 0 ? TelleRGUI.RowBg : TelleRGUI.RowBgAlt);
+                TelleRGUI.DrawBackground(row, bg);
+
+                bool showOpaque = bgActive && e.skipReason == null && e.rewritable && e.opaque;
+                bool showReadError = _settings.modifyImageFiles && e.errorTip != null;
+                var toggleRect = new Rect(row.x + 4f, row.y + 1f, 18f, 18f);
+                var iconRect = new Rect(toggleRect.xMax + 2f, row.y + 1f, 18f, 18f);
+                var removeRect = new Rect(row.xMax - 24f, row.y + 1f, 22f, 18f);
+                var badgeRect = new Rect(removeRect.x - 50f, row.y + 3f, 46f, 14f);
+                var opaqueRect = new Rect(badgeRect.x - 58f, row.y + 3f, 54f, 14f);
+                float labelEnd = showOpaque || showReadError ? opaqueRect.x : badgeRect.x;
+                var labelRect = new Rect(iconRect.xMax + 4f, row.y + 1f, labelEnd - iconRect.xMax - 8f, 18f);
+
+                using (new EditorGUI.DisabledScope(e.skipReason != null))
+                {
+                    bool inc = EditorGUI.Toggle(toggleRect, e.skipReason == null && e.include);
+                    if (e.skipReason == null) e.include = inc;
+                }
+                if (e.icon != null && Event.current.type == EventType.Repaint) GUI.DrawTexture(iconRect, e.icon, ScaleMode.ScaleToFit);
+
+                if (GUI.Button(labelRect, e.label ?? GUIContent.none, EditorStyles.label))
+                {
+                    _selected = i;
+                    RequestPreview(0);
+                }
+
+                if (showOpaque)
+                {
+                    TelleRGUI.DrawBadge(opaqueRect, "Opaque", TelleRGUI.Warning);
+                    GUI.Label(opaqueRect, GcOpaqueTip);
+                }
+                else if (showReadError)
+                {
+                    TelleRGUI.DrawBadge(opaqueRect, "Error", TelleRGUI.Danger);
+                    GUI.Label(opaqueRect, e.errorTip);
+                }
+
+                if (e.skipReason != null) TelleRGUI.DrawBadge(badgeRect, "Skip", TelleRGUI.Danger);
+                else if (e.isSprite) TelleRGUI.DrawBadge(badgeRect, "Sprite", TelleRGUI.Accent);
+                else TelleRGUI.DrawBadge(badgeRect, "New", TelleRGUI.Success);
+                GUI.Label(badgeRect, e.badgeTip ?? GUIContent.none); // 배지 툴팁
+
+                if (GUI.Button(removeRect, GcRemove, EditorStyles.miniButton)) removeAt = i;
+            }
+            EditorGUILayout.EndScrollView();
+
+            if (removeAt >= 0)
+            {
+                _entries.RemoveAt(removeAt);
+                if (_selected == removeAt) _selected = Mathf.Min(removeAt, _entries.Count - 1);
+                else if (_selected > removeAt) _selected--;
+                RequestPreview(0);
+            }
+
+            int skipped = 0;
+            for (int i = 0; i < _entries.Count; i++) if (_entries[i].skipReason != null) skipped++;
+            if (skipped > 0)
+                EditorGUILayout.LabelField($"Skip {skipped}개는 처리하지 않습니다. 이름을 누르면 이유가 미리보기에 표시됩니다.", TelleRGUI.Hint);
+        }
+
+        private void AddPathsFromObjects(UnityEngine.Object[] objs)
+        {
+            if (objs == null) return;
+            int before = _entries.Count;
+            int excluded = 0;
+            bool anyFolder = false;
+            var fromFolder = new List<Entry>();
+
+            foreach (var obj in objs)
+            {
+                if (obj == null) continue;
+                string path = AssetDatabase.GetAssetPath(obj);
+                if (string.IsNullOrEmpty(path)) continue;
+
+                if (AssetDatabase.IsValidFolder(path))
+                {
+                    anyFolder = true;
+                    var found = AutoSpriteSlicer.CollectFromFolder(path, _includeNonSpriteInFolders, out int ex);
+                    excluded += ex;
+                    foreach (var p in found)
+                    {
+                        Entry added = AddEntry(p);
+                        if (added != null) fromFolder.Add(added);
+                    }
+                }
+                else if (AutoSpriteSlicer.IsSupportedImage(path)) AddEntry(path);
+            }
+
+            if (_entries.Count > before) RefreshStatuses();
+
+            // 폴더에서 한꺼번에 들어온 불투명 이미지(전면 배경·패널·타일일 수 있음)는 직접 체크해야 처리된다.
+            int opaqueOff = 0;
+            if (BackgroundRemovalActive)
+            {
+                foreach (var e in fromFolder)
+                {
+                    if (e.skipReason == null && e.rewritable && e.opaque)
+                    {
+                        e.include = false;
+                        opaqueOff++;
+                    }
+                }
+            }
+
+            if (anyFolder)
+            {
+                var sb = new StringBuilder();
+                if (excluded > 0)
+                    sb.Append($"폴더에서 {excluded}개를 제외했습니다 (Sprite가 아닌 텍스처{(_includeNonSpriteInFolders ? "" : "는 위 옵션으로 포함 가능")}, 노멀맵·라이트맵·큐브맵·Multiple 시트 등은 항상 제외).");
+                if (opaqueOff > 0)
+                {
+                    if (sb.Length > 0) sb.Append(' ');
+                    sb.Append($"완전히 불투명한 {opaqueOff}개는 배경 제거로 가장자리가 지워질 수 있어 체크를 꺼 두었습니다(Opaque 배지). 처리하려면 직접 체크하세요.");
+                }
+                _folderNote = sb.ToString();
+            }
+
+            if (_entries.Count > before)
+            {
+                if (_selected < 0 || _selected >= _entries.Count) _selected = before;
+                RequestPreview(0);
+            }
+        }
+
+        private Entry AddEntry(string path)
+        {
+            for (int i = 0; i < _entries.Count; i++) if (_entries[i].path == path) return null;
+            var e = new Entry { path = path, include = true };
+            _entries.Add(e);
+            return e;
+        }
+
+        private void RefreshStatuses()
+        {
+            _statusDirty = false;
+            // 불투명 여부는 배경 제거가 켜져 있을 때만 쓰인다(Opaque 배지·폴더 체크 해제). 꺼져 있으면 원본을 디코드하지 않는다.
+            bool checkSource = BackgroundRemovalActive;
+            int pending = 0;
+            for (int i = 0; i < _entries.Count; i++)
+            {
+                Entry e = _entries[i];
+                e.skipReason = AutoSpriteSlicer.GetSkipReason(e.path);
+                var ti = AssetImporter.GetAtPath(e.path) as TextureImporter;
+                e.isSprite = ti != null && ti.textureType == TextureImporterType.Sprite;
+                e.rewritable = e.skipReason == null && AutoSpriteSlicer.GetRewriteBlocker(e.path) == null;
+                // 파일이 바뀌었거나 더 이상 다시 쓸 수 없으면 저장된 확인 결과를 버린다.
+                if (e.opaqueChecked && (!e.rewritable || e.opaqueStampTicks != FileStampTicks(e.path))) e.ResetSourceCheck();
+                if (checkSource && e.rewritable && !e.opaqueChecked) pending++;
+            }
+
+            if (pending > 0)
+            {
+                bool progress = pending > 8;
+                try
+                {
+                    int done = 0;
+                    for (int i = 0; i < _entries.Count; i++)
+                    {
+                        Entry e = _entries[i];
+                        if (!e.rewritable || e.opaqueChecked) continue;
+                        if (progress && EditorUtility.DisplayCancelableProgressBar("Auto Sprite Slicer",
+                                $"원본 확인 중 ({done + 1}/{pending}): {e.path}", (float)done / pending))
+                            break; // 남은 항목은 다음 갱신(창 포커스 등) 때 확인한다. 처리 전 확인 대화상자는 항상 정확하다.
+                        CheckSource(e);
+                        done++;
+                    }
+                }
+                finally
+                {
+                    if (progress) EditorUtility.ClearProgressBar();
+                }
+            }
+
+            for (int i = 0; i < _entries.Count; i++)
+            {
+                Entry e = _entries[i];
+                bool readError = e.skipReason == null && e.HasSourceError;
+                e.icon = AssetDatabase.GetCachedIcon(e.path);
+                e.label = new GUIContent(e.path, e.skipReason ?? (readError ? "원본을 읽지 못했습니다: " + e.sourceError : e.path));
+                e.badgeTip = new GUIContent(string.Empty, e.skipReason ?? (e.isSprite
+                    ? "이미 Sprite — PPU 유지, 트림 시 피벗은 Keep Pivot Position 설정을 따름"
+                    : "Sprite로 새로 변환 — New Sprite PPU/Pivot 적용"));
+                e.errorTip = readError
+                    ? new GUIContent(string.Empty, "원본을 읽지 못해 이미지 파일은 다시 쓰지 않습니다: " + e.sourceError)
+                    : null;
+            }
+        }
+
+        // OnGUI(Layout) 안에서 불리므로 손상되거나 비정상적인 파일이 와도 예외를 밖으로 내보내지 않는다.
+        private static void CheckSource(Entry e)
+        {
+            try
+            {
+                e.opaqueStampTicks = FileStampTicks(e.path);
+                e.opaque = AutoSpriteSlicer.IsSourceOpaque(e.path, out string error);
+                e.sourceError = error ?? string.Empty;
+            }
+            catch (Exception ex)
+            {
+                e.opaque = false;
+                e.sourceError = ex.GetType().Name + ": " + ex.Message;
+            }
+            e.opaqueChecked = true;
+        }
+
+        private static long FileStampTicks(string assetPath)
+        {
+            try
+            {
+                string full = AutoSpriteSlicer.ToFullPath(assetPath);
+                return File.Exists(full) ? File.GetLastWriteTimeUtc(full).Ticks : 0L;
+            }
+            catch (Exception) { return 0L; }
+        }
+
+        // ───────── 미리보기 ─────────
+
+        private void RequestPreview(double delay)
+        {
+            double due = EditorApplication.timeSinceStartup + delay;
+            if (_previewDue < 0 || due < _previewDue || delay > 0) _previewDue = due;
+        }
+
+        private Entry SelectedEntry => _selected >= 0 && _selected < _entries.Count ? _entries[_selected] : null;
+
+        // 픽셀 결과에 영향을 주는 값만 넣는다 (백업·피벗·PPU·JPG 품질은 미리보기와 무관).
+        private static string MakePreviewKey(string path, long stamp, AutoSpriteSlicer.Settings s) =>
+            $"{path}|{stamp}|{s.removeBackground}|{s.autoDetectKeys}|{(Color32)s.keyColor1}|{(Color32)s.keyColor2}|{s.colorTolerance}|{s.alphaThreshold}|{s.padding}";
+
+        private void RebuildPreview()
+        {
+            Entry e = SelectedEntry;
+            if (e == null) { ClearPreviewCache(); return; }
+
+            string skip = AutoSpriteSlicer.GetSkipReason(e.path);
+            if (skip != null) { SetPreviewNote("건너뜀: " + skip); return; }
+            if (!_settings.modifyImageFiles) { SetPreviewNote("Modify Image Files가 꺼져 있어 파일은 그대로 두고 임포터만 바꿉니다."); return; }
+            string blocker = AutoSpriteSlicer.GetRewriteBlocker(e.path);
+            if (blocker != null) { SetPreviewNote(blocker); return; }
+
+            long stamp = FileStampTicks(e.path);
+            string key = MakePreviewKey(e.path, stamp, _settings);
+            if (key == _previewKey && _previewNote == null) return; // 파일도 픽셀 옵션도 그대로
+
+            _previewNote = null;
+            DestroyTex(ref _previewResult);
+            _previewPlan = null;
+
+            // Update에서 불리므로 손상된 파일이 와도 예외를 밖으로 내보내지 않고 미리보기에 이유를 표시한다.
+            if (_cachePath != e.path || _cacheStamp != stamp)
+            {
+                ClearDecoded();
+                _cachePath = e.path;
+                _cacheStamp = stamp;
+                try
+                {
+                    _cacheImg = AutoSpriteSlicer.Decode(AutoSpriteSlicer.ToFullPath(e.path), AutoSpriteSlicer.GetEncodeFormat(e.path), out _cacheError);
+                    if (_cacheImg != null) _previewSource = MakeTexture(_cacheImg.Pixels, _cacheImg.Width, _cacheImg.Height);
+                }
+                catch (Exception ex)
+                {
+                    _cacheImg = null;
+                    DestroyTex(ref _previewSource);
+                    _cacheError = ex.GetType().Name + ": " + ex.Message;
+                }
+            }
+            _previewKey = key;
+            if (_cacheImg == null) return;
+
+            try
+            {
+                _previewPlan = AutoSpriteSlicer.ComputePlan(_cacheImg, _settings);
+                if (!_previewPlan.FullyTransparent)
+                {
+                    var px = AutoSpriteSlicer.ResultPixels(_previewPlan, _cacheImg, AutoSpriteSlicer.GetEncodeFormat(e.path), out int w, out int h);
+                    _previewResult = MakeTexture(px, w, h);
+                }
+            }
+            catch (Exception ex)
+            {
+                SetPreviewNote("미리보기를 계산하지 못했습니다: " + ex.GetType().Name + ": " + ex.Message);
+            }
+        }
+
+        private void SetPreviewNote(string note)
+        {
+            _previewNote = note;
+            _previewKey = null;
+            _previewPlan = null;
+            DestroyTex(ref _previewResult);
+            ClearDecoded();
         }
 
         private void DrawPreview()
         {
-            EditorGUILayout.LabelField("Preview (first trimmable target)", EditorStyles.boldLabel);
-            if (_previewSource == null)
+            Entry e = SelectedEntry;
+            TelleRGUI.Section(e != null ? "Preview — " + Path.GetFileName(e.path) : "Preview");
+            if (e == null)
             {
-                EditorGUILayout.HelpBox("미리볼 수 있는 타겟이 없습니다.", MessageType.None);
+                EditorGUILayout.LabelField("목록에서 이름을 누르면 미리보기가 표시됩니다.", TelleRGUI.HintCentered);
+                return;
+            }
+            if (_previewNote != null)
+            {
+                EditorGUILayout.HelpBox(_previewNote, e.skipReason != null ? MessageType.Warning : MessageType.Info);
+                return;
+            }
+            if (_cacheError != null && _cachePath == e.path)
+            {
+                EditorGUILayout.HelpBox("원본을 읽지 못했습니다: " + _cacheError, MessageType.Warning);
+                return;
+            }
+            if (_previewSource == null || _previewPlan == null || _cachePath != e.path)
+            {
+                EditorGUILayout.LabelField("미리보기 준비 중...", TelleRGUI.HintCentered);
                 return;
             }
 
-            string info = $"Source: {_previewSource.width} x {_previewSource.height}";
-            if (_previewBounds.width > 0)
+            var p = _previewPlan;
+            if (p.FullyTransparent)
             {
-                int srcArea = Mathf.Max(1, _previewSource.width * _previewSource.height);
-                int savedPct = Mathf.RoundToInt((1f - (float)(_previewBounds.width * _previewBounds.height) / srcArea) * 100f);
-                info += $"   →   Result: {_previewBounds.width} x {_previewBounds.height}   (saved {savedPct}%)";
+                EditorGUILayout.HelpBox("배경 제거 후 남는 픽셀이 없습니다. Color Tolerance나 Key Color를 확인하세요. 이 파일은 다시 쓰지 않습니다.", MessageType.Warning);
             }
-            EditorGUILayout.LabelField(info, EditorStyles.miniLabel);
-            EditorGUILayout.LabelField($"Max edge alpha (after bg removal): {_previewMaxEdgeAlpha}    (threshold: {_alphaThreshold})", EditorStyles.miniLabel);
+            else
+            {
+                string info = $"원본 {p.SourceWidth} x {p.SourceHeight}";
+                if (p.Trimmed)
+                {
+                    int srcArea = Mathf.Max(1, p.SourceWidth * p.SourceHeight);
+                    int savedPct = Mathf.RoundToInt((1f - (float)(p.Bounds.width * p.Bounds.height) / srcArea) * 100f);
+                    info += $"  →  결과 {p.Bounds.width} x {p.Bounds.height}  (-{savedPct}%)";
+                }
+                else info += "  →  트림 없음";
+                info += $"   ·   배경 제거 {p.AlphaChanged:N0}px   ·   가장자리 최대 알파 {p.MaxEdgeAlpha}";
+                EditorGUILayout.LabelField(info, TelleRGUI.Hint);
+                if (p.SourceOpaque && p.AlphaChanged > 0)
+                    EditorGUILayout.HelpBox("완전히 불투명한 이미지입니다. 모서리 색과 이어진 영역을 배경으로 보고 지운 뒤 잘라냅니다. 전면 배경·패널·타일이라면 이 파일의 체크를 끄세요.", MessageType.Warning);
+                if (p.KeyRemovalSkippedHasAlpha)
+                    EditorGUILayout.LabelField("이미 투명 픽셀이 있는 이미지라 자동 배경 색 제거는 건너뛰고 투명 여백만 트림합니다. 색 제거가 필요하면 Auto Detect Key Colors를 끄고 키 색을 지정하세요.", TelleRGUI.Hint);
+                if (!p.Trimmed && p.AlphaChanged == 0)
+                    EditorGUILayout.LabelField("바뀌는 픽셀이 없어 이 파일은 다시 쓰지 않습니다.", TelleRGUI.Hint);
+            }
 
             Rect r = GUILayoutUtility.GetRect(0, 200f, GUILayout.ExpandWidth(true));
-            DrawTextureFitted(new Rect(r.x, r.y, r.width * 0.5f - 4f, r.height), _previewSource, "Before");
-            DrawTextureFitted(new Rect(r.x + r.width * 0.5f + 4f, r.y, r.width * 0.5f - 4f, r.height), _previewResult, "After");
+            float half = r.width * 0.5f - 4f;
+            DrawTextureFitted(new Rect(r.x, r.y, half, r.height), _previewSource, "Before", p.Trimmed ? p.Bounds : (RectInt?)null);
+            DrawTextureFitted(new Rect(r.x + half + 8f, r.y, half, r.height), _previewResult, "After", null);
         }
 
-        private static void DrawTextureFitted(Rect rect, Texture2D tex, string label)
+        private static void DrawTextureFitted(Rect rect, Texture2D tex, string label, RectInt? bounds)
         {
-            EditorGUI.DrawRect(rect, new Color(0.15f, 0.15f, 0.15f));
-            GUI.Label(new Rect(rect.x + 4f, rect.y + 2f, rect.width, 16f), label, EditorStyles.miniLabel);
+            TelleRGUI.DrawBackground(rect, TelleRGUI.PanelBg);
+            GUI.Label(new Rect(rect.x + 4f, rect.y + 2f, rect.width - 8f, 16f), label, EditorStyles.miniLabel);
             if (tex == null || tex.width <= 0 || tex.height <= 0) return;
             Rect inner = new Rect(rect.x + 4f, rect.y + 18f, rect.width - 8f, rect.height - 22f);
             if (inner.width <= 0f || inner.height <= 0f) return;
@@ -162,506 +550,387 @@ namespace TelleR
             float w = tex.width * scale;
             float h = tex.height * scale;
             Rect draw = new Rect(inner.x + (inner.width - w) * 0.5f, inner.y + (inner.height - h) * 0.5f, w, h);
-            GUI.DrawTexture(draw, tex, ScaleMode.StretchToFill, true);
-        }
+            if (Event.current.type != EventType.Repaint) return;
 
-        private void DrawActions()
-        {
-            using (new EditorGUI.DisabledScope(dropPaths.Count == 0))
+            EditorGUI.DrawTextureTransparent(draw, tex, ScaleMode.StretchToFill); // 체커보드 위에 그려 투명 영역이 보이게
+
+            if (bounds.HasValue)
             {
-                if (GUILayout.Button($"Process {dropPaths.Count} Image(s)  (Trim+Remove+Single Sprite, Overwrite)", GUILayout.Height(32f)))
-                {
-                    bool ok = EditorUtility.DisplayDialog(
-                        "Overwrite Originals?",
-                        $"{dropPaths.Count}개 처리 내용:\n\n" +
-                        "• PNG/JPG/TGA: 배경 제거·트림 결과로 원본 파일이 덮어쓰기됩니다 (되돌리기 불가).\n" +
-                        "• JPG: 재인코딩으로 품질이 저하되며 반복 실행 시 누적됩니다.\n" +
-                        "• 그 외 포맷: 파일은 유지되고 임포터만 Sprite(Single)로 변경됩니다.\n" +
-                        "• Sprite Mode가 Multiple인 시트는 슬라이스 보호를 위해 건너뜁니다.\n\n" +
-                        "계속하시겠습니까?",
-                        "Process", "Cancel");
-                    if (ok) Process();
-                }
+                RectInt b = bounds.Value;
+                // 텍스처 좌표는 아래가 y=0, GUI는 위가 y=0
+                var br = new Rect(draw.x + b.x * scale, draw.yMax - (b.y + b.height) * scale, b.width * scale, b.height * scale);
+                Color c = TelleRGUI.Accent;
+                EditorGUI.DrawRect(new Rect(br.x, br.y, br.width, 1f), c);
+                EditorGUI.DrawRect(new Rect(br.x, br.yMax - 1f, br.width, 1f), c);
+                EditorGUI.DrawRect(new Rect(br.x, br.y, 1f, br.height), c);
+                EditorGUI.DrawRect(new Rect(br.xMax - 1f, br.y, 1f, br.height), c);
             }
-        }
-
-        private void HandleDragAndDrop(Rect r)
-        {
-            var e = Event.current;
-            if (!r.Contains(e.mousePosition)) return;
-            if (e.type == EventType.DragUpdated || e.type == EventType.DragPerform)
-            {
-                DragAndDrop.visualMode = DragAndDropVisualMode.Copy;
-                if (e.type == EventType.DragPerform)
-                {
-                    DragAndDrop.AcceptDrag();
-                    AddPathsFromObjects(DragAndDrop.objectReferences, true);
-                }
-                e.Use();
-            }
-        }
-
-        private void AddPathsFromObjects(UnityEngine.Object[] objs, bool includeFolders)
-        {
-            var newPaths = new List<string>();
-            foreach (var obj in objs)
-            {
-                if (obj == null) continue;
-                var path = AssetDatabase.GetAssetPath(obj);
-                if (string.IsNullOrEmpty(path)) continue;
-
-                if (includeFolders && Directory.Exists(path))
-                {
-                    var guids = AssetDatabase.FindAssets("t:Texture2D", new[] { path });
-                    foreach (var guid in guids)
-                    {
-                        var p = AssetDatabase.GUIDToAssetPath(guid);
-                        if (IsSupportedImage(p)) newPaths.Add(p);
-                    }
-                }
-                else if (IsSupportedImage(path)) newPaths.Add(path);
-            }
-
-            bool added = false;
-            foreach (var p in newPaths)
-            {
-                if (!dropPaths.Contains(p)) { dropPaths.Add(p); added = true; }
-            }
-            if (added) BuildPreview();
-        }
-
-        private static bool IsSupportedImage(string path)
-        {
-            for (int i = 0; i < SupportedExtensions.Length; i++)
-                if (path.EndsWith(SupportedExtensions[i], StringComparison.OrdinalIgnoreCase)) return true;
-            return false;
-        }
-
-        private static EncodeFormat GetEncodeFormat(string path)
-        {
-            if (path.EndsWith(".png", StringComparison.OrdinalIgnoreCase)) return EncodeFormat.Png;
-            if (path.EndsWith(".jpg", StringComparison.OrdinalIgnoreCase) || path.EndsWith(".jpeg", StringComparison.OrdinalIgnoreCase)) return EncodeFormat.Jpg;
-            if (path.EndsWith(".tga", StringComparison.OrdinalIgnoreCase)) return EncodeFormat.Tga;
-            return EncodeFormat.None;
-        }
-
-        private void Process()
-        {
-            int processed = 0, trimmed = 0, skipped = 0, protectedSheets = 0;
-
-            try
-            {
-                AssetDatabase.StartAssetEditing();
-
-                for (int i = 0; i < dropPaths.Count; i++)
-                {
-                    string path = dropPaths[i];
-                    EditorUtility.DisplayProgressBar("Processing", path, (float)i / dropPaths.Count);
-
-                    if (!IsSupportedImage(path)) { skipped++; continue; }
-
-                    // Multiple 시트는 수작업 슬라이스가 파괴되므로 건드리지 않음
-                    if (IsMultipleSprite(path)) { protectedSheets++; continue; }
-
-                    EncodeFormat fmt = GetEncodeFormat(path);
-                    if (fmt != EncodeFormat.None)
-                    {
-                        if (TryTrimAndRemove(path, fmt, (byte)_alphaThreshold, _padding, _autoDetectKeys, _keyColor1, _keyColor2, _colorTolerance, _jpgQuality))
-                        {
-                            trimmed++;
-                            AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceUpdate);
-                        }
-                    }
-
-                    if (!ApplySingleSpriteImporter(path)) { skipped++; continue; }
-                    processed++;
-                }
-            }
-            catch (Exception ex)
-            {
-                Debug.LogError("[AutoSpriteSlicer] " + ex.Message + "\n" + ex.StackTrace);
-            }
-            finally
-            {
-                EditorUtility.ClearProgressBar();
-                AssetDatabase.StopAssetEditing();
-                AssetDatabase.SaveAssets();
-                AssetDatabase.Refresh();
-            }
-
-            _lastReport = $"Imported: {processed} / Trimmed: {trimmed} / Skipped: {skipped}";
-            if (protectedSheets > 0) _lastReport += $" / Multiple 시트 보호 스킵: {protectedSheets}";
-            Debug.Log("[AutoSpriteSlicer] " + _lastReport);
-            BuildPreview();
-        }
-
-        private static bool IsMultipleSprite(string path)
-        {
-            var importer = AssetImporter.GetAtPath(path) as TextureImporter;
-            return importer != null && importer.spriteImportMode == SpriteImportMode.Multiple;
-        }
-
-        private static bool ApplySingleSpriteImporter(string path)
-        {
-            var importer = AssetImporter.GetAtPath(path) as TextureImporter;
-            if (importer == null) return false;
-
-            importer.textureType = TextureImporterType.Sprite;
-            importer.spriteImportMode = SpriteImportMode.Single;
-            importer.alphaIsTransparency = true;
-            importer.spritePixelsPerUnit = 100f;
-
-            var settings = new TextureImporterSettings();
-            importer.ReadTextureSettings(settings);
-            settings.spriteAlignment = (int)SpriteAlignment.Center;
-            settings.spritePivot = new Vector2(0.5f, 0.5f);
-            importer.SetTextureSettings(settings);
-
-            importer.SaveAndReimport();
-            return true;
-        }
-
-        // ───────── Trim + Background Removal ─────────
-
-        private static bool TryTrimAndRemove(string assetPath, EncodeFormat fmt, byte alphaThreshold, int padding,
-                                             bool autoDetectKeys, Color keyColor1, Color keyColor2, float tolerance, int jpgQuality)
-        {
-            if (string.IsNullOrEmpty(assetPath) || !File.Exists(assetPath)) return false;
-
-            Texture2D tex = LoadReadable(assetPath);
-            if (tex == null) return false;
-
-            try
-            {
-                int w = tex.width, h = tex.height;
-                Color32[] px = tex.GetPixels32();
-
-                Color32[] keys = autoDetectKeys ? GetCornerColors32(px, w, h) : new[] { (Color32)keyColor1, (Color32)keyColor2 };
-                byte tolByte = (byte)Mathf.Clamp(Mathf.RoundToInt(tolerance * 255f), 0, 255);
-
-                bool modified = RemoveBackgroundFlood(px, w, h, keys, tolByte) > 0;
-
-                if (!FindOpaqueBounds(px, w, h, alphaThreshold, out RectInt bounds))
-                {
-                    Debug.LogWarning($"[AutoSpriteSlicer] 완전 투명/매칭: {assetPath}");
-                    return false;
-                }
-                bounds = ApplyPadding(bounds, w, h, padding);
-                bool boundsChanged = !(bounds.width == w && bounds.height == h);
-                if (!modified && !boundsChanged) return false;
-
-                Color32[] outPx;
-                int ow, oh;
-                if (boundsChanged) { outPx = Crop(px, w, bounds); ow = bounds.width; oh = bounds.height; }
-                else { outPx = px; ow = w; oh = h; }
-
-                // JPG cannot store alpha — flatten removed pixels to first key color
-                if (fmt == EncodeFormat.Jpg && modified) FlattenAlphaToColor(outPx, keys[0]);
-
-                byte[] bytes = EncodeBytes(outPx, ow, oh, fmt, jpgQuality);
-                if (bytes == null || bytes.Length == 0) return false;
-
-                File.WriteAllBytes(assetPath, bytes);
-                return true;
-            }
-            finally { UnityEngine.Object.DestroyImmediate(tex); }
-        }
-
-        private static byte[] EncodeBytes(Color32[] px, int w, int h, EncodeFormat fmt, int jpgQuality)
-        {
-            var tex = new Texture2D(w, h, TextureFormat.RGBA32, false);
-            try
-            {
-                tex.SetPixels32(px);
-                tex.Apply(false, false);
-                switch (fmt)
-                {
-                    case EncodeFormat.Png: return tex.EncodeToPNG();
-                    case EncodeFormat.Jpg: return tex.EncodeToJPG(jpgQuality);
-                    case EncodeFormat.Tga: return tex.EncodeToTGA();
-                    default: return null;
-                }
-            }
-            finally { UnityEngine.Object.DestroyImmediate(tex); }
-        }
-
-        private static void FlattenAlphaToColor(Color32[] px, Color32 fill)
-        {
-            fill.a = 255;
-            for (int i = 0; i < px.Length; i++)
-            {
-                if (px[i].a < 255) px[i] = fill;
-            }
-        }
-
-        // PNG/JPG: 빠른 파일 바이트 → LoadImage 경로. 그 외: 임포트된 Texture에서 GPU Blit.
-        private static Texture2D LoadReadable(string assetPath)
-        {
-            string ext = Path.GetExtension(assetPath).ToLowerInvariant();
-            if (ext == ".png" || ext == ".jpg" || ext == ".jpeg")
-            {
-                byte[] bytes = File.ReadAllBytes(assetPath);
-                var tex = new Texture2D(2, 2, TextureFormat.RGBA32, false);
-                if (tex.LoadImage(bytes, false)) return tex;
-                UnityEngine.Object.DestroyImmediate(tex);
-                return null;
-            }
-
-            var src = AssetDatabase.LoadAssetAtPath<Texture2D>(assetPath);
-            if (src == null) return null;
-            return BlitToReadable(src);
-        }
-
-        private static Texture2D BlitToReadable(Texture2D src)
-        {
-            var prev = RenderTexture.active;
-            // sRGB로 왕복해야 Linear 색공간 프로젝트에서도 바이트 값이 보존됨 (Linear 고정 시 재저장 색 왜곡)
-            var rt = RenderTexture.GetTemporary(src.width, src.height, 0, RenderTextureFormat.ARGB32, RenderTextureReadWrite.sRGB);
-            Graphics.Blit(src, rt);
-            RenderTexture.active = rt;
-            var dst = new Texture2D(src.width, src.height, TextureFormat.RGBA32, false);
-            dst.ReadPixels(new Rect(0, 0, src.width, src.height), 0, 0);
-            dst.Apply(false, false);
-            RenderTexture.active = prev;
-            RenderTexture.ReleaseTemporary(rt);
-            return dst;
-        }
-
-        private void BuildPreview()
-        {
-            ClearPreview();
-            string targetPath = null;
-            for (int i = 0; i < dropPaths.Count; i++)
-            {
-                string p = dropPaths[i];
-                if (GetEncodeFormat(p) != EncodeFormat.None && File.Exists(p) && !IsMultipleSprite(p)) { targetPath = p; break; }
-            }
-            if (targetPath == null) return;
-
-            Texture2D loaded = LoadReadable(targetPath);
-            if (loaded == null) return;
-
-            int w = loaded.width, h = loaded.height;
-            Color32[] before = loaded.GetPixels32();
-            Color32[] work = (Color32[])before.Clone();
-
-            Color32[] keys = _autoDetectKeys ? GetCornerColors32(before, w, h) : new[] { (Color32)_keyColor1, (Color32)_keyColor2 };
-            byte tolByte = (byte)Mathf.Clamp(Mathf.RoundToInt(_colorTolerance * 255f), 0, 255);
-            RemoveBackgroundFlood(work, w, h, keys, tolByte);
-
-            _previewMaxEdgeAlpha = ComputeMaxEdgeAlpha(work, w, h);
-            _previewSource = MakeTexture(before, w, h);
-
-            if (FindOpaqueBounds(work, w, h, (byte)_alphaThreshold, out RectInt bounds))
-            {
-                bounds = ApplyPadding(bounds, w, h, _padding);
-                _previewBounds = bounds;
-                _previewResult = MakeTexture(Crop(work, w, bounds), bounds.width, bounds.height);
-            }
-
-            _previewPath = targetPath;
-            UnityEngine.Object.DestroyImmediate(loaded);
         }
 
         private static Texture2D MakeTexture(Color32[] px, int w, int h)
         {
-            var t = new Texture2D(w, h, TextureFormat.RGBA32, false);
-            t.SetPixels32(px);
-            t.Apply(false, false);
+            var t = new Texture2D(w, h, TextureFormat.RGBA32, false) { hideFlags = HideFlags.HideAndDontSave };
+            try
+            {
+                t.SetPixels32(px);
+                t.Apply(false, false);
+            }
+            catch (Exception)
+            {
+                DestroyImmediate(t); // HideAndDontSave 텍스처가 남지 않게
+                throw;
+            }
             return t;
         }
 
-        private void ClearPreview()
+        private static void DestroyTex(ref Texture2D t)
         {
-            if (_previewSource != null) { UnityEngine.Object.DestroyImmediate(_previewSource); _previewSource = null; }
-            if (_previewResult != null) { UnityEngine.Object.DestroyImmediate(_previewResult); _previewResult = null; }
-            _previewBounds = default;
-            _previewMaxEdgeAlpha = 0;
-            _previewPath = null;
+            if (t != null) DestroyImmediate(t);
+            t = null;
         }
 
-        private static Color32[] Crop(Color32[] src, int srcW, RectInt b)
+        private void ClearDecoded()
         {
-            var dst = new Color32[b.width * b.height];
-            for (int y = 0; y < b.height; y++)
-            {
-                int srcRow = (b.y + y) * srcW + b.x;
-                int dstRow = y * b.width;
-                Array.Copy(src, srcRow, dst, dstRow, b.width);
-            }
-            return dst;
+            DestroyTex(ref _previewSource);
+            _cacheImg = null;
+            _cacheError = null;
+            _cachePath = null;
+            _cacheStamp = 0;
         }
 
-        private static RectInt ApplyPadding(RectInt b, int w, int h, int pad)
+        private void ClearPreviewCache()
         {
-            if (pad <= 0) return b;
-            int x = Mathf.Max(0, b.x - pad);
-            int y = Mathf.Max(0, b.y - pad);
-            int xMax = Mathf.Min(w, b.x + b.width + pad);
-            int yMax = Mathf.Min(h, b.y + b.height + pad);
-            return new RectInt(x, y, xMax - x, yMax - y);
+            ClearDecoded();
+            DestroyTex(ref _previewResult);
+            _previewPlan = null;
+            _previewNote = null;
+            _previewKey = null;
         }
 
-        private static int ComputeMaxEdgeAlpha(Color32[] px, int w, int h)
+        // ───────── 옵션 ─────────
+
+        private void DrawOptions()
         {
-            int max = 0;
-            for (int x = 0; x < w; x++)
-            {
-                if (px[x].a > max) max = px[x].a;
-                if (h > 1 && px[(h - 1) * w + x].a > max) max = px[(h - 1) * w + x].a;
-            }
-            for (int y = 1; y < h - 1; y++)
-            {
-                if (px[y * w].a > max) max = px[y * w].a;
-                if (w > 1 && px[y * w + (w - 1)].a > max) max = px[y * w + (w - 1)].a;
-            }
-            return max;
-        }
+            TelleRGUI.Section("Options");
+            var s = _settings;
+            bool pixelChanged = false; // 미리보기 픽셀에 영향을 주는 옵션만 재계산을 요청한다
 
-        // 가장자리부터 안쪽으로 스캔, 각 변에서 첫 불투명 발견 시 조기 종료.
-        private static bool FindOpaqueBounds(Color32[] px, int w, int h, byte alphaThreshold, out RectInt bounds)
-        {
-            int minY = -1;
-            for (int y = 0; y < h; y++)
+            EditorGUI.BeginChangeCheck();
+            s.modifyImageFiles = EditorGUILayout.Toggle(GcModify, s.modifyImageFiles);
+            bool modeChanged = EditorGUI.EndChangeCheck();
+            using (new EditorGUI.DisabledScope(!s.modifyImageFiles))
             {
-                int row = y * w;
-                for (int x = 0; x < w; x++)
-                    if (px[row + x].a >= alphaThreshold) { minY = y; goto FoundTop; }
+                EditorGUI.BeginChangeCheck();
+                s.removeBackground = EditorGUILayout.Toggle(GcRemoveBg, s.removeBackground);
+                modeChanged |= EditorGUI.EndChangeCheck();
+                s.backupOriginals = EditorGUILayout.Toggle(GcBackup, s.backupOriginals);
+                s.keepPivotPosition = EditorGUILayout.Toggle(GcKeepPivot, s.keepPivotPosition);
             }
-            FoundTop:
-            if (minY < 0) { bounds = default; return false; }
+            if (s.modifyImageFiles && !s.backupOriginals)
+                EditorGUILayout.HelpBox("백업이 꺼져 있습니다. 덮어쓴 원본은 되돌릴 수 없습니다.", MessageType.Warning);
 
-            int maxY = minY;
-            for (int y = h - 1; y > minY; y--)
+            s.newSpritePixelsPerUnit = Mathf.Max(0.0001f, EditorGUILayout.FloatField(GcNewPpu, s.newSpritePixelsPerUnit));
+            s.newSpriteAlignment = (SpriteAlignment)EditorGUILayout.EnumPopup(GcNewPivot, s.newSpriteAlignment);
+            if (s.newSpriteAlignment == SpriteAlignment.Custom)
             {
-                int row = y * w;
-                for (int x = 0; x < w; x++)
-                    if (px[row + x].a >= alphaThreshold) { maxY = y; goto FoundBottom; }
+                using (new EditorGUI.IndentLevelScope())
+                    s.newSpriteCustomPivot = EditorGUILayout.Vector2Field(GcCustomPivot, s.newSpriteCustomPivot);
             }
-            FoundBottom:
 
-            int minX = 0;
-            for (int x = 0; x < w; x++)
+            _showAdvanced = EditorGUILayout.Foldout(_showAdvanced, "Advanced", true);
+            if (_showAdvanced)
             {
-                for (int y = minY; y <= maxY; y++)
-                    if (px[y * w + x].a >= alphaThreshold) { minX = x; goto FoundLeft; }
-            }
-            FoundLeft:
-
-            int maxX = minX;
-            for (int x = w - 1; x > minX; x--)
-            {
-                for (int y = minY; y <= maxY; y++)
-                    if (px[y * w + x].a >= alphaThreshold) { maxX = x; goto FoundRight; }
-            }
-            FoundRight:
-
-            bounds = new RectInt(minX, minY, maxX - minX + 1, maxY - minY + 1);
-            return true;
-        }
-
-        private static Color32[] GetCornerColors32(Color32[] px, int w, int h)
-        {
-            Color32[] corners = { px[0], px[w - 1], px[(h - 1) * w], px[(h - 1) * w + (w - 1)] };
-            var unique = new List<Color32>(4);
-            for (int i = 0; i < corners.Length; i++)
-            {
-                Color32 c = corners[i];
-                if (c.a == 0) continue; // 투명 코너의 RGB는 배경키가 아님 (오브젝트 동일색 침식 방지)
-                bool dup = false;
-                for (int j = 0; j < unique.Count; j++)
+                using (new EditorGUI.IndentLevelScope())
+                using (new EditorGUI.DisabledScope(!s.modifyImageFiles))
                 {
-                    if (ChebyshevByte(unique[j], c) <= 5) { dup = true; break; }
+                    EditorGUI.BeginChangeCheck();
+                    s.alphaThreshold = EditorGUILayout.IntSlider(GcAlpha, s.alphaThreshold, 0, 255);
+                    s.padding = EditorGUILayout.IntSlider(GcPadding, s.padding, 0, 64);
+                    using (new EditorGUI.DisabledScope(!s.removeBackground))
+                    {
+                        s.autoDetectKeys = EditorGUILayout.Toggle(GcAutoKeys, s.autoDetectKeys);
+                        using (new EditorGUI.DisabledScope(s.autoDetectKeys))
+                        {
+                            s.keyColor1 = EditorGUILayout.ColorField(GcKey1, s.keyColor1);
+                            s.keyColor2 = EditorGUILayout.ColorField(GcKey2, s.keyColor2);
+                        }
+                        s.colorTolerance = EditorGUILayout.Slider(GcTolerance, s.colorTolerance, 0f, 0.5f);
+                    }
+                    pixelChanged |= EditorGUI.EndChangeCheck();
+                    s.jpgQuality = EditorGUILayout.IntSlider(GcJpg, s.jpgQuality, 50, 100);
+                    if (GUILayout.Button("Reset Advanced"))
+                    {
+                        var d = new AutoSpriteSlicer.Settings();
+                        s.alphaThreshold = d.alphaThreshold;
+                        s.padding = d.padding;
+                        s.autoDetectKeys = d.autoDetectKeys;
+                        s.keyColor1 = d.keyColor1;
+                        s.keyColor2 = d.keyColor2;
+                        s.colorTolerance = d.colorTolerance;
+                        s.jpgQuality = d.jpgQuality;
+                        pixelChanged = true;
+                    }
                 }
-                if (!dup) unique.Add(c);
             }
-            return unique.ToArray();
-        }
 
-        private static int ChebyshevByte(Color32 a, Color32 b)
-        {
-            int dr = a.r - b.r; if (dr < 0) dr = -dr;
-            int dg = a.g - b.g; if (dg < 0) dg = -dg;
-            int db = a.b - b.b; if (db < 0) db = -db;
-            int m = dr > dg ? dr : dg;
-            return m > db ? m : db;
-        }
-
-        // 스캔라인 flood fill: 가장자리 시드 → 좌우 런 확장 → 위/아래 행 enqueue. BFS 대비 큐 push 횟수 대폭 감소.
-        private static int RemoveBackgroundFlood(Color32[] px, int w, int h, Color32[] keys, byte tolByte)
-        {
-            if (keys == null || keys.Length == 0) return 0;
-            bool[] visited = new bool[w * h];
-            var stack = new Stack<int>(1024);
-
-            for (int x = 0; x < w; x++) { SeedScanline(x, 0, w, px, visited, stack, keys, tolByte); SeedScanline(x, h - 1, w, px, visited, stack, keys, tolByte); }
-            for (int y = 1; y < h - 1; y++) { SeedScanline(0, y, w, px, visited, stack, keys, tolByte); SeedScanline(w - 1, y, w, px, visited, stack, keys, tolByte); }
-
-            int removed = 0;
-            while (stack.Count > 0)
+            // 원본 불투명 확인은 배경 제거가 켜질 때만 하므로 모드가 바뀌면 목록 상태를 다시 계산한다.
+            if (modeChanged)
             {
-                int seed = stack.Pop();
-                int sy = seed / w;
-                int sx = seed % w;
-                int rowStart = sy * w;
+                pixelChanged = true;
+                _statusDirty = true;
+            }
+            // 슬라이더 드래그마다 전체 재계산하지 않도록 잠깐 멈춘 뒤 캐시된 픽셀로 다시 계산
+            if (pixelChanged) RequestPreview(PreviewDelay);
+        }
 
-                int left = sx;
-                while (left > 0 && !visited[rowStart + left - 1] && MatchKey32(px[rowStart + left - 1], keys, tolByte)) left--;
-                int right = sx;
-                while (right < w - 1 && !visited[rowStart + right + 1] && MatchKey32(px[rowStart + right + 1], keys, tolByte)) right++;
+        // ───────── 실행 ─────────
 
-                for (int x = left; x <= right; x++)
+        private void DrawActions()
+        {
+            EditorGUILayout.Space(8f);
+            int count = 0;
+            for (int i = 0; i < _entries.Count; i++) if (_entries[i].skipReason == null && _entries[i].include) count++;
+
+            using (new EditorGUI.DisabledScope(count == 0))
+            {
+                Color prev = GUI.backgroundColor;
+                GUI.backgroundColor = TelleRGUI.AccentButton;
+                bool clicked = GUILayout.Button($"Process {count} Image(s)", GUILayout.Height(32f));
+                GUI.backgroundColor = prev;
+                if (clicked)
                 {
-                    int idx = rowStart + x;
-                    if (visited[idx]) continue;
-                    visited[idx] = true;
-                    Color32 c = px[idx];
-                    if (c.a != 0) { c.a = 0; px[idx] = c; }
-                    removed++;
+                    RunProcess();
+                    GUIUtility.ExitGUI();
                 }
-
-                AddScanlineSeeds(sy - 1, left, right, w, h, px, visited, stack, keys, tolByte);
-                AddScanlineSeeds(sy + 1, left, right, w, h, px, visited, stack, keys, tolByte);
             }
-            return removed;
-        }
 
-        private static void SeedScanline(int x, int y, int w, Color32[] px, bool[] visited, Stack<int> stack, Color32[] keys, byte tolByte)
-        {
-            int idx = y * w + x;
-            if (visited[idx]) return;
-            if (!MatchKey32(px[idx], keys, tolByte)) return;
-            stack.Push(idx);
-        }
-
-        private static void AddScanlineSeeds(int y, int left, int right, int w, int h, Color32[] px, bool[] visited, Stack<int> stack, Color32[] keys, byte tolByte)
-        {
-            if (y < 0 || y >= h) return;
-            int row = y * w;
-            bool inRun = false;
-            for (int x = left; x <= right; x++)
+            using (new EditorGUILayout.HorizontalScope())
             {
-                int idx = row + x;
-                if (!visited[idx] && MatchKey32(px[idx], keys, tolByte))
+                if (GUILayout.Button("Open Backup Folder"))
                 {
-                    if (!inRun) { stack.Push(idx); inRun = true; }
+                    string root = AutoSpriteSlicer.BackupRoot;
+                    if (Directory.Exists(root)) EditorUtility.RevealInFinder(root);
+                    else TelleRGUI.Info("백업 없음", "아직 만든 백업이 없습니다.\n" + root);
                 }
-                else inRun = false;
+                if (GUILayout.Button("Restore Last Backup..."))
+                {
+                    RunRestore();
+                    GUIUtility.ExitGUI();
+                }
             }
         }
 
-        private static bool MatchKey32(Color32 c, Color32[] keys, byte tolByte)
+        private void RunProcess()
         {
-            if (c.a == 0) return true;
-            for (int i = 0; i < keys.Length; i++)
+            RefreshStatuses();
+            var targets = new List<string>();
+            int skipped = 0;
+            foreach (var e in _entries)
             {
-                Color32 k = keys[i];
-                int dr = c.r - k.r; if (dr < 0) dr = -dr; if (dr > tolByte) continue;
-                int dg = c.g - k.g; if (dg < 0) dg = -dg; if (dg > tolByte) continue;
-                int db = c.b - k.b; if (db < 0) db = -db; if (db > tolByte) continue;
-                return true;
+                if (e.skipReason != null) { skipped++; continue; }
+                if (e.include) targets.Add(e.path);
             }
-            return false;
+            if (targets.Count == 0) return;
+
+            // 파일만 건드리지 않는 모드에서도 .meta는 백업한다.
+            var run = _settings.Clone();
+            if (!run.modifyImageFiles) run.backupOriginals = true;
+
+            // 실제로 무엇이 바뀌는지 먼저 계산해 대화상자에 그대로 보여 준다(쓰기 없음).
+            var dry = AutoSpriteSlicer.DryRun(targets, run, true);
+            if (dry.Cancelled) return;
+
+            int nRewrite = dry.Count(AutoSpriteSlicer.PlannedAction.Rewrite);
+            int nImporter = dry.Count(AutoSpriteSlicer.PlannedAction.ImporterOnly);
+            if (nRewrite + nImporter == 0)
+            {
+                TelleRGUI.Info("변경 없음", $"바꿀 것이 없습니다. 선택한 {targets.Count}개 모두 현재 옵션으로 처리한 결과와 같습니다." +
+                                        ErrorLines(dry));
+                return;
+            }
+
+            if (!TelleRGUI.Confirm("Auto Sprite Slicer 처리 확인", BuildConfirmMessage(dry, run, skipped), "처리", "취소")) return;
+
+            var result = AutoSpriteSlicer.Process(targets, run, true);
+            _lastReport = result.ToReport();
+            _lastReportHasFailures = result.Failed.Count > 0 || result.Cancelled;
+
+            string log = AutoSpriteSlicer.LogPrefix + result.ToReport(200);
+            if (result.Failed.Count > 0) Debug.LogWarning(log); else Debug.Log(log);
+
+            ClearPreviewCache();
+            _statusDirty = true;
+            RequestPreview(0);
+        }
+
+        private static string BuildConfirmMessage(AutoSpriteSlicer.DryRunResult dry, AutoSpriteSlicer.Settings s, int skippedInList)
+        {
+            int nRewrite = dry.Count(AutoSpriteSlicer.PlannedAction.Rewrite);
+            int nImporter = dry.Count(AutoSpriteSlicer.PlannedAction.ImporterOnly);
+            int nUnchanged = dry.Count(AutoSpriteSlicer.PlannedAction.Unchanged);
+            int nSkip = dry.Count(AutoSpriteSlicer.PlannedAction.Skip) + skippedInList;
+            int nConvert = 0, nOpaque = 0, nNotes = 0;
+            foreach (var f in dry.Files)
+            {
+                if (f.ConvertToSprite) nConvert++;
+                if (f.OpaqueSourceLosesPixels) nOpaque++;
+                if (f.Action == AutoSpriteSlicer.PlannedAction.Rewrite || f.Action == AutoSpriteSlicer.PlannedAction.ImporterOnly) nNotes += f.Notes.Count;
+            }
+
+            var sb = new StringBuilder();
+            sb.Append($"파일 수정 {nRewrite}개 · 임포터만 변경 {nImporter}개 · 변경 없음 {nUnchanged}개");
+            if (nSkip > 0) sb.Append($" · 건너뜀 {nSkip}개");
+            sb.Append('\n');
+            if (!s.modifyImageFiles) sb.Append("Modify Image Files가 꺼져 있어 이미지 파일은 수정하지 않습니다.\n");
+
+            if (nRewrite > 0)
+            {
+                sb.Append("\n[다시 쓰는 파일] 해상도는 원본 기준으로 잘라내기만 합니다.\n");
+                int shown = 0;
+                foreach (var f in dry.Files)
+                {
+                    if (f.Action != AutoSpriteSlicer.PlannedAction.Rewrite) continue;
+                    if (shown++ >= MaxDialogLines) continue;
+                    sb.Append("• ").Append(Path.GetFileName(f.Path)).Append("  ")
+                      .Append(f.SourceWidth).Append('x').Append(f.SourceHeight);
+                    if (f.ResultWidth != f.SourceWidth || f.ResultHeight != f.SourceHeight)
+                        sb.Append(" → ").Append(f.ResultWidth).Append('x').Append(f.ResultHeight);
+                    else sb.Append(" (크기 유지)");
+                    if (f.BackgroundPixelsRemoved > 0) sb.Append($", 배경 {f.BackgroundPixelsRemoved:N0}px 제거");
+                    if (f.Lossy) sb.Append($", JPG 품질 {s.jpgQuality}로 재압축");
+                    if (f.OpaqueSourceLosesPixels) sb.Append(" [불투명 원본]");
+                    sb.Append('\n');
+                }
+                if (shown > MaxDialogLines) sb.Append($"• 외 {shown - MaxDialogLines}개\n");
+                if (nOpaque > 0)
+                    sb.Append($"※ [불투명 원본] {nOpaque}개는 모서리 색과 이어진 영역이 배경으로 지워집니다. 전면 배경·패널·타일이면 취소하고 체크를 끄세요.\n");
+            }
+
+            if (nImporter > 0)
+            {
+                sb.Append("\n[임포터만 변경] 파일 내용은 그대로입니다.\n");
+                int shown = 0;
+                foreach (var f in dry.Files)
+                {
+                    if (f.Action != AutoSpriteSlicer.PlannedAction.ImporterOnly) continue;
+                    if (shown++ >= MaxDialogLines / 2) continue;
+                    sb.Append("• ").Append(Path.GetFileName(f.Path)).Append(f.ConvertToSprite ? " — Sprite로 변환\n" : " — 임포트 설정 변경\n");
+                }
+                if (shown > MaxDialogLines / 2) sb.Append($"• 외 {shown - MaxDialogLines / 2}개\n");
+            }
+
+            sb.Append("\n[임포트 설정]\n");
+            if (nConvert > 0)
+                sb.Append($"• 새로 Sprite로 바꿀 {nConvert}개: Sprite(Single), PPU {s.newSpritePixelsPerUnit:0.##}, Pivot {PivotLabel(s)}, Sprite 기본 임포트 설정(밉맵 끔 등).\n");
+            sb.Append("• 이미 Sprite인 파일은 PPU를 유지합니다.");
+            if (s.modifyImageFiles)
+                sb.Append(" 트림되면 9-slice 보더와 커스텀 Outline/Physics Shape를 잘린 만큼 옮기고, 피벗은 ")
+                  .Append(s.keepPivotPosition ? "같은 픽셀 위치(Custom)로 옮깁니다." : "정규화 값 그대로 둡니다.");
+            sb.Append('\n');
+            if (nNotes > 0) sb.Append($"• 참고 사항 {nNotes}건은 처리 후 보고서에 표시됩니다.\n");
+
+            sb.Append("\n[백업]\n");
+            if (s.backupOriginals)
+                sb.Append($"• 바뀌는 파일과 .meta를 {AutoSpriteSlicer.BackupRootRelative}/<시각>/ 에 복사합니다. Restore Last Backup으로 되돌릴 수 있습니다.");
+            else
+                sb.Append("• 꺼짐 — 덮어쓴 파일은 되돌릴 수 없습니다.");
+
+            sb.Append(ErrorLines(dry));
+            return sb.ToString();
+        }
+
+        private static string ErrorLines(AutoSpriteSlicer.DryRunResult dry)
+        {
+            int n = dry.Count(AutoSpriteSlicer.PlannedAction.Error);
+            if (n == 0) return string.Empty;
+            var sb = new StringBuilder($"\n\n[확인 실패 {n}개] 처리할 때 실패로 보고됩니다.\n");
+            int shown = 0;
+            foreach (var f in dry.Files)
+            {
+                if (f.Action != AutoSpriteSlicer.PlannedAction.Error) continue;
+                if (shown++ >= 5) continue;
+                sb.Append("• ").Append(Path.GetFileName(f.Path)).Append(" — ").Append(f.Reason).Append('\n');
+            }
+            if (shown > 5) sb.Append($"• 외 {shown - 5}개\n");
+            return sb.ToString();
+        }
+
+        private static string PivotLabel(AutoSpriteSlicer.Settings s) =>
+            s.newSpriteAlignment == SpriteAlignment.Custom
+                ? $"Custom ({s.newSpriteCustomPivot.x:0.##}, {s.newSpriteCustomPivot.y:0.##})"
+                : s.newSpriteAlignment.ToString();
+
+        private void RunRestore()
+        {
+            string dir = AutoSpriteSlicer.FindLatestBackup();
+            if (dir == null)
+            {
+                TelleRGUI.Info("백업 없음", "되돌릴 백업이 없습니다.\n" + AutoSpriteSlicer.BackupRoot);
+                return;
+            }
+            var entries = AutoSpriteSlicer.ReadBackupEntries(dir);
+            int ok = 0;
+            foreach (var en in entries) if (en.Problem == null) ok++;
+
+            var sb = new StringBuilder();
+            if (ok > 0)
+            {
+                sb.Append($"'{Path.GetFileName(dir)}' 백업의 {ok}개 에셋을 백업 시점으로 되돌립니다.\n");
+                sb.Append("지금의 파일 내용과 임포트 설정(.meta)은 덮어써집니다.\n\n");
+                int shown = 0;
+                foreach (var en in entries)
+                {
+                    if (en.Problem != null) continue;
+                    if (shown++ >= MaxDialogLines) continue;
+                    sb.Append("• ").Append(en.CurrentPath);
+                    if (en.Moved) sb.Append("  (이동됨, 백업 당시 ").Append(en.RecordedPath).Append(')');
+                    sb.Append('\n');
+                }
+                if (shown > MaxDialogLines) sb.Append($"• 외 {shown - MaxDialogLines}개\n");
+            }
+            else sb.Append($"'{Path.GetFileName(dir)}' 백업에서 되돌릴 수 있는 에셋이 없습니다.\n");
+
+            int bad = entries.Count - ok;
+            if (bad > 0)
+            {
+                sb.Append($"\n복원하지 않는 {bad}개:\n");
+                int shown = 0;
+                foreach (var en in entries)
+                {
+                    if (en.Problem == null) continue;
+                    if (shown++ >= 5) continue;
+                    sb.Append("• ").Append(en.RecordedPath).Append(" — ").Append(en.Problem).Append('\n');
+                }
+                if (shown > 5) sb.Append($"• 외 {shown - 5}개\n");
+            }
+
+            if (ok == 0)
+            {
+                TelleRGUI.Info("백업 복원", sb.ToString());
+                return;
+            }
+            if (!TelleRGUI.Confirm("백업 복원", sb.ToString(), "복원", "취소")) return;
+
+            var failures = new List<AutoSpriteSlicer.Issue>();
+            int restored = AutoSpriteSlicer.RestoreBackup(dir, failures);
+            var report = new StringBuilder($"백업 복원: {restored}/{entries.Count}개 ({dir})");
+            foreach (var f in failures) report.Append("\n • ").Append(f.Path).Append(" — ").Append(f.Reason);
+            _lastReport = report.ToString();
+            _lastReportHasFailures = failures.Count > 0;
+            if (failures.Count > 0) Debug.LogWarning(AutoSpriteSlicer.LogPrefix + _lastReport);
+            else Debug.Log(AutoSpriteSlicer.LogPrefix + _lastReport);
+
+            ClearPreviewCache();
+            _statusDirty = true;
+            RequestPreview(0);
+        }
+
+        private void DrawReport()
+        {
+            if (string.IsNullOrEmpty(_lastReport)) return;
+            EditorGUILayout.Space(4f);
+            EditorGUILayout.HelpBox(_lastReport, _lastReportHasFailures ? MessageType.Warning : MessageType.Info);
+            if (GUILayout.Button("Clear Report", EditorStyles.miniButton, GUILayout.Width(90f))) _lastReport = string.Empty;
         }
     }
 }

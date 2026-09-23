@@ -35,10 +35,29 @@ namespace TelleR
         public PlayState CurrentPlayState => playState;
         public int CurrentFrame => currentFrame;
         public int MaxFrame => cachedMaxFrame;
+        /// <summary>현재 클립의 길이(초).</summary>
+        public float ClipLength => cachedLength;
         public float CurrentTime => FrameToTime(currentFrame);
         public bool IsGraphReady => graphReady && graph.IsValid() && mixer.IsValid();
         public AnimationClip CurrentClip { get; private set; }
         public bool IsBlending => currentBlend != null && currentBlend.IsActive;
+        /// <summary>마지막 Play/SetSpeed로 지정된 속도(0 이상, 방향 제외).</summary>
+        public float Speed => currentSpeed;
+        /// <summary>마지막 Play로 지정된 재생 방향.</summary>
+        public bool IsReverse => currentReverse;
+
+        /// <summary>
+        /// 현재 클립(블렌드 중이면 새로 들어오는 클립)의 재생 시간(초). 클립 길이로 자르지 않은 원시 값이다.
+        /// </summary>
+        public double ActiveTime
+        {
+            get
+            {
+                if (!IsGraphReady) return 0d;
+                int idx = IsBlending ? currentBlend.ToIndex : activeIndex;
+                return clipPlayables[idx].IsValid() ? clipPlayables[idx].GetTime() : 0d;
+            }
+        }
 
         class BlendTransition
         {
@@ -46,6 +65,8 @@ namespace TelleR
             public float Elapsed;
             public int FromIndex;
             public int ToIndex;
+            // 재생 중이 아닐 때(완주 후 EndFrame 고정 등) 시작한 블렌드는 빠져나가는 클립을 그 포즈로 멈춰 둔다
+            public bool FreezeFrom;
             public bool IsActive => Elapsed < Duration;
             public float Progress => Duration > 0 ? Mathf.Clamp01(Elapsed / Duration) : 1f;
         }
@@ -111,6 +132,9 @@ namespace TelleR
         {
             if (!IsGraphReady || !newClip) return;
 
+            // 블렌드 도중 다시 전환하면 진행 중이던 블렌드를 먼저 끝내고(새 클립을 기준으로) 다음 블렌드를 시작한다
+            FinishBlend();
+
             float prevSpeed = currentSpeed;
             bool prevReverse = currentReverse;
 
@@ -140,7 +164,8 @@ namespace TelleR
                     Duration = blendDuration,
                     Elapsed = 0f,
                     FromIndex = activeIndex,
-                    ToIndex = targetIndex
+                    ToIndex = targetIndex,
+                    FreezeFrom = playState != PlayState.Playing
                 };
 
                 mixer.SetInputWeight(activeIndex, 1f);
@@ -190,46 +215,71 @@ namespace TelleR
         {
             if (!IsGraphReady) return;
 
-            currentSpeed = Mathf.Max(0.001f, speed);
+            // 속도 0은 제자리 정지(Animator.speed = 0과 같은 의미). 0.001로 올려 '기어가는' 재생을 만들지 않는다
+            currentSpeed = Mathf.Max(0f, speed);
             currentReverse = reverse;
 
-            SetPlayState(PlayState.Playing);
             float s = currentSpeed * (reverse ? -1f : 1f);
 
             if (IsBlending)
             {
-                clipPlayables[currentBlend.FromIndex].SetSpeed(s);
+                if (!currentBlend.FreezeFrom)
+                    clipPlayables[currentBlend.FromIndex].SetSpeed(s);
                 clipPlayables[currentBlend.ToIndex].SetSpeed(s);
             }
             else
             {
                 clipPlayables[activeIndex].SetSpeed(s);
             }
+
+            // 상태 알림은 그래프 반영이 끝난 뒤에 보낸다(Play/Pause/Stop 공통) — 핸들러가 그 안에서 Pause·클립 교체를
+            // 하면, 알림 뒤에 남은 속도 설정이 핸들러의 결과를 덮어써 상태와 실제 재생이 어긋난다
+            SetPlayState(PlayState.Playing);
         }
 
         public void Pause()
         {
             if (!IsGraphReady) return;
-            SetPlayState(PlayState.Paused);
 
             for (int i = 0; i < clipPlayables.Length; i++)
             {
                 if (clipPlayables[i].IsValid())
                     clipPlayables[i].SetSpeed(0f);
             }
+
+            SetPlayState(PlayState.Paused);
         }
 
         public void Stop()
         {
-            SetPlayState(PlayState.Stopped);
-            if (!IsGraphReady) return;
-
-            for (int i = 0; i < clipPlayables.Length; i++)
+            if (IsGraphReady)
             {
-                if (clipPlayables[i].IsValid())
-                    clipPlayables[i].SetSpeed(0f);
+                for (int i = 0; i < clipPlayables.Length; i++)
+                {
+                    if (clipPlayables[i].IsValid())
+                        clipPlayables[i].SetSpeed(0f);
+                }
+
+                // 블렌드 도중 정지하면 두 클립이 섞인 채로 남지 않도록 새 클립으로 가중치를 확정한다
+                FinishBlend();
             }
 
+            SetPlayState(PlayState.Stopped);
+        }
+
+        private void FinishBlend()
+        {
+            if (currentBlend == null) return;
+
+            if (mixer.IsValid())
+            {
+                mixer.SetInputWeight(currentBlend.FromIndex, 0f);
+                mixer.SetInputWeight(currentBlend.ToIndex, 1f);
+            }
+            if (clipPlayables[currentBlend.FromIndex].IsValid())
+                clipPlayables[currentBlend.FromIndex].SetSpeed(0f);
+
+            activeIndex = currentBlend.ToIndex;
             currentBlend = null;
         }
 
@@ -242,7 +292,8 @@ namespace TelleR
 
             if (IsBlending)
             {
-                clipPlayables[currentBlend.FromIndex].SetSpeed(s);
+                if (!currentBlend.FreezeFrom)
+                    clipPlayables[currentBlend.FromIndex].SetSpeed(s);
                 clipPlayables[currentBlend.ToIndex].SetSpeed(s);
             }
             else
@@ -261,25 +312,23 @@ namespace TelleR
             NotifyFrameChanged();
         }
 
+        /// <summary>현재 클립을 지정 시간(초)으로 옮긴다. 루프 wrap에서 넘친 시간을 보존할 때 쓴다.</summary>
+        public void JumpToTime(double time)
+        {
+            if (!IsGraphReady) return;
+            float t = Mathf.Clamp((float)time, 0f, cachedLength);
+            ApplyTimeToPlayable(t);
+            currentFrame = TimeToFrame(t);
+            NotifyFrameChanged();
+        }
+
         public void UpdateCurrentFrameFromPlayable()
         {
             if (!IsGraphReady) return;
 
-            double t;
-            if (IsBlending)
-            {
-                float weight0 = mixer.GetInputWeight(currentBlend.FromIndex);
-                float weight1 = mixer.GetInputWeight(currentBlend.ToIndex);
-                double time0 = clipPlayables[currentBlend.FromIndex].GetTime();
-                double time1 = clipPlayables[currentBlend.ToIndex].GetTime();
-                t = time0 * weight0 + time1 * weight1;
-            }
-            else
-            {
-                t = clipPlayables[activeIndex].GetTime();
-            }
-
-            currentFrame = TimeToFrame((float)t);
+            // 블렌드 중에도 프레임은 새 클립(ToIndex)의 시간만으로 계산한다 — 서로 다른 두 클립의 시간을
+            // 가중 평균하면 새 클립 길이로 잘려 즉시 루프 wrap·완료가 일어나고 초반 이벤트가 건너뛰어진다
+            currentFrame = TimeToFrame((float)ActiveTime);
             NotifyFrameChanged();
         }
 
@@ -319,7 +368,7 @@ namespace TelleR
 
             if (IsBlending)
             {
-                clipPlayables[currentBlend.FromIndex].SetTime(t);
+                // 빠져나가는 클립은 다른 클립이므로 시간을 건드리지 않는다(건드리면 블렌드 중 포즈가 튄다)
                 clipPlayables[currentBlend.ToIndex].SetTime(t);
             }
             else

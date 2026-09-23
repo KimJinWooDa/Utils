@@ -1,13 +1,40 @@
 {
   "name": "com.teller.util",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "displayName": "TelleR Utilities",
-  "description": "Unity editor utilities by TelleR - Fast Clone, and more",
+  "description": "Unity editor utilities by TelleR - Mesh Pivot, Concave Mesh Collider, Skinned Mesh Collider, Trail Effect, Audio Volume 3D, Animation Inspector, Sprite/Atlas tools, Fast Clone, UPM Package Creator. Optional packages (URP, uGUI, XR, FBX Exporter) are detected automatically and never required.",
   "documentationUrl": "https://github.com/KimJinWooDa/Utils#readme",
   "changelogUrl": "https://github.com/KimJinWooDa/Utils/blob/main/CHANGELOG.md",
+  "licensesUrl": "https://github.com/KimJinWooDa/Utils/blob/main/LICENSE.md",
+  "license": "MIT",
   "unity": "2021.3",
   "author": {
-    "name": "TelleR"
+    "name": "TelleR",
+    "url": "https://github.com/KimJinWooDa"
   },
-  "keywords": []
+  "dependencies": {
+    "com.unity.modules.animation": "1.0.0",
+    "com.unity.modules.audio": "1.0.0",
+    "com.unity.modules.imageconversion": "1.0.0",
+    "com.unity.modules.imgui": "1.0.0",
+    "com.unity.modules.jsonserialize": "1.0.0",
+    "com.unity.modules.physics": "1.0.0",
+    "com.unity.modules.uielements": "1.0.0"
+  },
+  "keywords": [
+    "tools",
+    "editor",
+    "mesh",
+    "pivot",
+    "collider",
+    "concave",
+    "convex decomposition",
+    "trail",
+    "audio",
+    "animation",
+    "sprite",
+    "atlas",
+    "clone",
+    "upm"
+  ]
 }

@@ -1,5 +1,4 @@
 using System.Collections.Generic;
-using System.Linq;
 using UnityEngine;
 
 #if UNITY_EDITOR
@@ -30,10 +29,6 @@ namespace TelleR
             var controller = animator.runtimeAnimatorController as AnimatorController;
             if (controller != null)
             {
-                var paramDict = new Dictionary<string, AnimatorControllerParameterType>();
-                foreach (var param in controller.parameters)
-                    paramDict[param.name] = param.type;
-
                 for (int layerIdx = 0; layerIdx < controller.layers.Length; layerIdx++)
                 {
                     var layer = controller.layers[layerIdx];
@@ -54,7 +49,6 @@ namespace TelleR
                                 IsDefault = layerIdx == 0 && state.state == stateMachine.defaultState,
                             };
 
-                            AnalyzeTransitions(controller, state.state, paramDict, info);
                             result.Add(info);
                         }
                     }
@@ -84,54 +78,5 @@ namespace TelleR
 
             return result;
         }
-
-#if UNITY_EDITOR
-        private static void AnalyzeTransitions(AnimatorController controller, AnimatorState targetState, 
-            Dictionary<string, AnimatorControllerParameterType> paramDict, ClipInfo info)
-        {
-            var foundTypes = new HashSet<TriggerType>();
-            string firstParam = "";
-
-            foreach (var layer in controller.layers)
-            {
-                if (layer.stateMachine == null) continue; // Synced Layer는 stateMachine이 null
-
-                foreach (var transition in layer.stateMachine.anyStateTransitions)
-                {
-                    if (transition.destinationState == targetState)
-                        AnalyzeConditions(transition.conditions, paramDict, foundTypes, ref firstParam);
-                }
-
-                foreach (var state in layer.stateMachine.states)
-                {
-                    foreach (var transition in state.state.transitions)
-                    {
-                        if (transition.destinationState == targetState)
-                            AnalyzeConditions(transition.conditions, paramDict, foundTypes, ref firstParam);
-                    }
-                }
-            }
-        }
-
-        private static void AnalyzeConditions(AnimatorCondition[] conditions, Dictionary<string, AnimatorControllerParameterType> paramDict, 
-            HashSet<TriggerType> foundTypes, ref string firstParam)
-        {
-            foreach (var cond in conditions)
-            {
-                if (!paramDict.TryGetValue(cond.parameter, out var paramType)) continue;
-
-                if (paramType == AnimatorControllerParameterType.Bool)
-                {
-                    foundTypes.Add(TriggerType.Bool);
-                    if (string.IsNullOrEmpty(firstParam)) firstParam = cond.parameter;
-                }
-                else if (paramType == AnimatorControllerParameterType.Trigger)
-                {
-                    foundTypes.Add(TriggerType.Trigger);
-                    if (string.IsNullOrEmpty(firstParam)) firstParam = cond.parameter;
-                }
-            }
-        }
-#endif
     }
 }

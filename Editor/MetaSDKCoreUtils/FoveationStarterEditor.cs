@@ -8,6 +8,7 @@ namespace TelleR
     public class FoveationStarterEditor : Editor
     {
         SerializedProperty levelProp;
+        SerializedProperty timeoutProp;
 
         static readonly string[] levelLabels = { "None (0.0)", "Low (0.33)", "Medium (0.67)", "High (1.0)" };
         static readonly float[] levelValues = { 0f, 0.33f, 0.67f, 1.0f };
@@ -15,13 +16,24 @@ namespace TelleR
         void OnEnable()
         {
             levelProp = serializedObject.FindProperty("foveatedRenderingLevel");
+            timeoutProp = serializedObject.FindProperty("xrWaitTimeout");
         }
 
         public override void OnInspectorGUI()
         {
             serializedObject.Update();
 
-            EditorGUILayout.LabelField("Foveation Starter", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("Foveation Starter", TelleRGUI.Header);
+#if !TELLER_XR
+            EditorGUILayout.HelpBox(
+                "XR 모듈(com.unity.modules.xr)이 없는 프로젝트라 Foveated Rendering이 적용되지 않습니다.\n" +
+                "Package Manager > Built-in에서 XR 모듈을 켜거나 XR Plug-in Management를 설치하세요.",
+                MessageType.Warning);
+#elif !UNITY_2022_2_OR_NEWER
+            EditorGUILayout.HelpBox(
+                "Foveated Rendering API(XRDisplaySubsystem.foveatedRenderingLevel)는 Unity 2022.2 이상에서만 제공되어 이 버전에서는 적용되지 않습니다.",
+                MessageType.Warning);
+#endif
             EditorGUILayout.Space(4);
 
             // Slider
@@ -34,7 +46,7 @@ namespace TelleR
             {
                 bool isActive = Mathf.Approximately(levelProp.floatValue, levelValues[i]);
                 var prevColor = GUI.backgroundColor;
-                if (isActive) GUI.backgroundColor = new Color(0.5f, 0.8f, 1f);
+                if (isActive) GUI.backgroundColor = TelleRGUI.AccentButton;
 
                 if (GUILayout.Button(levelLabels[i], GUILayout.Height(24)))
                     levelProp.floatValue = levelValues[i];
@@ -42,6 +54,11 @@ namespace TelleR
                 GUI.backgroundColor = prevColor;
             }
             EditorGUILayout.EndHorizontal();
+
+            EditorGUILayout.Space(2);
+            if (timeoutProp != null)
+                EditorGUILayout.PropertyField(timeoutProp, new GUIContent("XR Wait Timeout (s)",
+                    "XR 디스플레이가 늦게 초기화되는 경우를 위해 이 시간(초) 동안 재시도합니다."));
 
             EditorGUILayout.Space(6);
 

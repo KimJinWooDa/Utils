@@ -1,7 +1,42 @@
 {
   "name": "Teller.Util.Editor",
-  "rootNamespace": "Teller.Util",
-  "includePlatforms": ["Editor"],
+  "rootNamespace": "TelleR",
+  "references": [
+    "Teller.Util",
+    "UnityEngine.UI",
+    "Unity.RenderPipelines.Universal.Runtime",
+    "Unity.RenderPipelines.Core.Runtime"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
   "excludePlatforms": [],
-  "references": ["Teller.Util", "UnityEngine.UI"]
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [
+    {
+      "name": "com.unity.ugui",
+      "expression": "",
+      "define": "TELLER_UGUI"
+    },
+    {
+      "name": "com.unity.render-pipelines.universal",
+      "expression": "",
+      "define": "TELLER_URP"
+    },
+    {
+      "name": "com.unity.modules.xr",
+      "expression": "",
+      "define": "TELLER_XR"
+    },
+    {
+      "name": "com.unity.formats.fbx",
+      "expression": "",
+      "define": "TELLER_FBX"
+    }
+  ],
+  "noEngineReferences": false
 }

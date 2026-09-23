@@ -44,6 +44,9 @@ namespace TelleR
         [Range(4, 128)] public int MaxSnapshots = 32;
         [Range(0.001f, 1f)] public float MinDistance = 0.01f;
 
+        [Tooltip("이 Profile을 쓰는 TrailEffect에 머티리얼이 지정되지 않았을 때 사용할 'TelleR/Trail' 머티리얼 (선택)")]
+        public Material TrailMaterial;
+
         void Reset()
         {
             ColorOverLifetime = new Gradient();
