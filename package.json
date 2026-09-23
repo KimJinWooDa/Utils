@@ -1,8 +1,8 @@
 {
   "name": "com.teller.util",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "displayName": "TelleR Utilities",
-  "description": "Unity editor utilities by TelleR - Mesh Pivot, Concave Mesh Collider, Skinned Mesh Collider, Trail Effect, Audio Volume 3D, Animation Inspector, Sprite/Atlas tools, Fast Clone, UPM Package Creator. Optional packages (URP, uGUI, XR, FBX Exporter) are detected automatically and never required.",
+  "description": "Unity editor utilities by TelleR - Mesh Pivot, Concave Mesh Collider, Skinned Mesh Collider, Grass Blade Mesh Generator, Mesh Fragmenter, Tris Profiler, Trail Effect, Audio Volume 3D, Animation Inspector, Sprite/Atlas tools, Fast Clone, UPM Package Creator. Optional packages (URP, uGUI, XR, FBX Exporter) are detected automatically and never required.",
   "documentationUrl": "https://github.com/KimJinWooDa/Utils#readme",
   "changelogUrl": "https://github.com/KimJinWooDa/Utils/blob/main/CHANGELOG.md",
   "licensesUrl": "https://github.com/KimJinWooDa/Utils/blob/main/LICENSE.md",
@@ -35,6 +35,9 @@
     "sprite",
     "atlas",
     "clone",
-    "upm"
+    "upm",
+    "grass",
+    "fragment",
+    "profiler"
   ]
 }

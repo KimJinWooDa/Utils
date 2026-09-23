@@ -3,7 +3,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Unity-2021.3+-blue?logo=unity" alt="Unity">
   <img src="https://img.shields.io/badge/License-MIT-green" alt="License">
-  <img src="https://img.shields.io/badge/Version-1.2.0-orange" alt="Version">
+  <img src="https://img.shields.io/badge/Version-1.3.0-orange" alt="Version">
 </p>
 
 <p align="center">
@@ -76,6 +76,8 @@ https://github.com/KimJinWooDa/Utils.git
 | 📄 **FBX Backup** (MeshFilter FBX Generator) | 씬 전용 메쉬를 .asset 또는 FBX로 백업 | MeshFilter / SkinnedMeshRenderer Inspector 자동 표시 |
 | 🧩 **Concave Mesh Collider** 🆕 | 오목한 메쉬를 볼록 조각 여러 개(Box/Sphere/Capsule/볼록 MeshCollider)로 나눈 복합 콜라이더 생성 | `Tools → TelleR → Concave Mesh Collider` / `Hierarchy 우클릭 → TelleR → Generate Concave Collider` |
 | 🦴 **Skinned Mesh Collider** | SkinnedMeshRenderer → MeshCollider 변환 | `Tools → TelleR → Skinned Mesh Collider` |
+| 🌾 **Grass Blade Mesh Generator** 🆕 | 로우폴리 풀잎 메쉬(Triangle / Quad / QuadCross / TriCross)를 .asset으로 생성 | `Tools → TelleR → Grass Blade Mesh Generator` |
+| 💥 **Mesh Fragmenter** 🆕 | 메쉬를 보로노이 조각(볼록 MeshCollider + Rigidbody)으로 미리 잘라 두기 | `Tools → TelleR → Mesh Fragmenter` |
 
 ### 🔊 오디오 도구
 
@@ -104,6 +106,12 @@ https://github.com/KimJinWooDa/Utils.git
 | 🚀 **Fast Clone** | 멀티플레이어 테스트용 프로젝트 복제 | `Tools → TelleR → Fast Clone` |
 | 📦 **UPM Package Creator** | UPM 패키지 생성, package.json/asmdef 자동 생성 | `Tools → TelleR → UPM Package Creator` |
 
+### 🔺 성능 분석 도구
+
+| 기능 | 설명 | 사용 방법 |
+|------|------|-----------|
+| 🔺 **Tris Profiler** 🆕 | 카메라에 보이는 메시의 삼각형·정점 수 합계와 무거운 오브젝트 순위 | `Tools → TelleR → Tris Profiler` |
+
 ### 🥽 XR (Meta Quest) 도구
 
 | 기능 | 설명 | 사용 방법 |
@@ -126,7 +134,7 @@ https://github.com/KimJinWooDa/Utils.git
 
 | 상황 | 설명 |
 |------|------|
-| 도구 찾기 | 카테고리 헤더와 짧은 한국어 설명, 검색창으로 13개 도구 탐색 |
+| 도구 찾기 | 카테고리 헤더와 짧은 한국어 설명, 검색창으로 16개 도구 탐색 |
 | 창 도구 열기 | 버튼으로 해당 도구 창을 바로 열기 |
 | 컴포넌트 추가 | **Add to Selection**으로 선택한 오브젝트에 컴포넌트 추가 (Undo 가능) |
 | 요구 사항 확인 | 필요한 선택 패키지(URP, uGUI, XR, FBX Exporter)나 Unity 버전이 없으면 표시 |
@@ -274,6 +282,74 @@ https://github.com/KimJinWooDa/Utils.git
 | Custom | 직접 설정 |
 
 > 💡 Convex 기본값은 **OFF**입니다. Convex MeshCollider는 255 폴리곤 제한이 있어 간소화가 의미가 없으므로, Rigidbody용 오목한 콜라이더가 필요하면 **Concave Mesh Collider**를 사용하세요.
+
+</details>
+
+---
+
+<details>
+<summary>🌾 <b>Grass Blade Mesh Generator</b> 🆕 - 로우폴리 풀잎 메쉬 생성</summary>
+
+<br>
+
+**로우폴리 풀잎 메쉬를 만들어 `.asset`으로 저장합니다.** 피벗은 풀잎 뿌리(바닥 중앙)이고 +Y가 위쪽입니다. 면이 한쪽뿐이므로 양면 렌더링(Cull Off) 셰이더와 함께 쓰세요.
+
+| 항목 | 설명 |
+|------|------|
+| Shape | Triangle(삼각형 1장, 정점 3·삼각형 1) / Quad(사각형 1장, 4·2) / QuadCross(사각형 2장 90° 교차, 8·4) / TriCross(사각형 3장 60° 간격, 12·6, 기본값) |
+| Width / Height | 풀잎 뿌리 폭과 높이(미터) |
+| Tip Taper | 끝 폭 ÷ 뿌리 폭. 0이면 뾰족하고 1이면 직사각형입니다(Triangle에는 적용되지 않음) |
+| Curve (Z lean) | 끝을 각 면의 앞(+Z)으로 기울이는 정도(높이 대비 비율). 음수면 반대쪽으로 기울어집니다 |
+| Reset | 모양·크기 값(Shape·Width·Height·Tip Taper·Curve)을 기본값으로 되돌림 |
+| Folder / File Name | 저장 위치(Assets 아래, 없으면 만듦). 이름을 비워 두면 `GrassBlade_<Shape>` |
+| Create | 메쉬를 저장하고 Project 창에서 선택합니다. 같은 이름이 있으면 덮어쓰기(GUID 유지, Ctrl+Z 가능) 또는 새 이름으로 저장을 고릅니다 |
+
+**사용 방법:**
+1. `Tools → TelleR → Grass Blade Mesh Generator` 창 열기
+2. Blade 섹션에서 Shape·크기를 정하고 풀잎 1개당 정점·삼각형 수 확인
+3. Output 섹션에서 Folder / File Name을 정하고 저장 위치 미리보기 확인
+4. **Create** 클릭
+
+> 💡 기본 저장 폴더: `Assets/TelleR/Generated/GrassBlades`. 코드에서는 `TelleR.GrassBladeMeshGenerator.GenerateAndSave(...)`로도 만들 수 있습니다.
+
+</details>
+
+---
+
+<details>
+<summary>💥 <b>Mesh Fragmenter</b> 🆕 - 메쉬를 물리 조각으로 미리 잘라 두기</summary>
+
+<br>
+
+**선택한 오브젝트의 메쉬를 보로노이 셀로 잘라, 단면이 막힌 물리 조각(볼록 MeshCollider + Rigidbody)을 원본 옆에 만듭니다.** 부서지는 오브젝트를 런타임 연산 없이 미리 만들어 둘 때 씁니다. 외부 패키지가 필요 없습니다.
+
+| 상황 | 설명 |
+|------|------|
+| 부서지는 소품 | 조각 루트를 꺼 두었다가 깨질 때 `SetActive(true)` 후 Kinematic 해제 |
+| 여러 오브젝트 한 번에 | 다중 선택 시 대상마다 따로 자르며, 진행 막대에서 취소 가능 |
+| 프리팹 편집 | 프리팹 편집 모드에서도 동작 (이때 메쉬는 항상 .asset으로 저장) |
+
+**사용 방법:**
+1. `Tools → TelleR → Mesh Fragmenter` 창을 열고 Hierarchy에서 MeshFilter가 있는 오브젝트 선택
+2. Targets 목록의 배지 확인 — Ready / Open Mesh(닫히지 않은 메쉬, 속이 빈 조각이 될 수 있음) / No Mesh / Prefab Asset(처리 안 함)
+3. **Fragment** 클릭 → 원본 옆에 `{이름}_Fragments` 루트와 조각 생성
+4. 씬 변경은 `Ctrl+Z` 한 번으로 모두 되돌릴 수 있습니다 (저장한 메쉬 .asset 파일은 남습니다)
+
+**주요 옵션:**
+
+| 옵션 | 설명 |
+|------|------|
+| Fragments | 조각 수 4 / 8 / 16 / 32 |
+| Seed | 조각 모양을 정하는 난수 시드 (같은 시드 = 같은 결과) |
+| Interior Material | 잘린 단면 머티리얼. 비우면 원본의 첫 머티리얼 사용. FBX 내장·서브 에셋·내장 머티리얼도 정확히 기억 |
+| Mass Per Fragment / Kinematic / Use Gravity / Start Inactive | 조각 Rigidbody·루트 초기 상태 |
+| Source Object | 생성 후 원본 처리: Keep / Hide Renderer / Deactivate (Undo 가능) |
+| Save Meshes As Asset / Asset Folder | 조각 메쉬를 `Assets/` 아래 폴더에 .asset으로 저장 (기본 `Assets/TelleR/Fragments`, 기존 파일은 덮어쓰지 않음). 끄면 씬에만 저장 |
+| Reset | 설정을 기본값으로 되돌림 |
+
+설정은 EditorPrefs에 저장되어 창을 다시 열어도 유지됩니다.
+
+**스크립트에서 사용:** `MeshFragmentEditor.Fragment(IList<GameObject> targets, MeshFragmenterOptions options)` — 대화상자 없이 조각 루트 목록을 반환하고 결과는 `[TelleR/Mesh Fragmenter]` 로그로 남깁니다. 씬 변경은 Undo 한 그룹으로 묶입니다.
 
 </details>
 
@@ -531,6 +607,40 @@ STEP 3 → 버전 업데이트 및 개발 모드 전환
 ```
 
 > ⚠️ **Dev Mode**는 `Packages/manifest.json`을 로컬 폴더(`file:`) 경로로 바꿉니다. 같은 드라이브면 상대 경로를 씁니다. 이 상태의 manifest.json은 커밋하지 말고, 배포 전에 Deploy(git URL)로 되돌리세요.
+
+</details>
+
+---
+
+<!-- ────────────────── 성능 분석 ────────────────── -->
+
+<details>
+<summary>🔺 <b>Tris Profiler</b> 🆕 - 카메라에 보이는 삼각형·정점 수 측정</summary>
+
+<br>
+
+**지금 카메라에 실제로 그려지는 메시가 무엇이고, 어떤 오브젝트가 삼각형을 가장 많이 쓰는지 볼 때 사용합니다.**
+
+| 상황 | 설명 |
+|------|------|
+| 폴리곤 예산 확인 | 카메라 절두체 안 MeshRenderer·SkinnedMeshRenderer의 삼각형·정점 합계와 오브젝트 수 표시 |
+| 무거운 오브젝트 찾기 | 삼각형 수 내림차순 표(상위 5~50행), 비율(%), 정점, LOD 단계, 카메라 거리 |
+| 같은 메시 묶어 보기 | **Group by Mesh**로 같은 메시를 쓰는 렌더러를 한 줄로 합산 |
+| 바로 선택 | 행 클릭으로 선택, Ctrl(⌘)+클릭으로 추가·제외, **Select Top**으로 상위 행 전체 선택 |
+| 기준 카메라 | 비워 두면 MainCamera, Camera 칸에 직접 지정, 또는 **Scene View** 카메라 기준(프리팹 모드에서는 프리팹 내용만) |
+
+**정확도:**
+
+| 항목 | 처리 |
+|------|------|
+| 머티리얼 슬롯 | 실제로 그려지는 서브메시만 계산(머티리얼이 더 많으면 마지막 서브메시를 다시 계산), 쿼드는 삼각형 2개 |
+| LODGroup | 카메라 거리·LOD Bias·Maximum LOD Level로 활성 단계 추정, 컬링된 LOD는 제외 |
+| 제외 대상 | 비활성·꺼진 렌더러, forceRenderingOff, 카메라 cullingMask 밖 레이어 |
+| 반영 안 함 | 가림(Occlusion) 컬링, 레이어별 컬링 거리, Terrain·파티클·UI·스프라이트·라인 |
+
+**갱신:** **Auto**를 켜 두면 창이 보이는 동안만 자동으로 다시 셉니다. 씬이 크면 간격이 0.5~5초 사이에서 자동으로 늘어납니다. 다른 탭 뒤에 가려진 창은 스크립트 리컴파일이나 에디터 재시작 뒤에도 씬을 훑지 않습니다. Auto가 꺼져 있어도 창을 열 때 한 번은 세고, 이후에는 **Refresh**로 다시 셉니다.
+
+**메뉴:** `Tools → TelleR → Tris Profiler`
 
 </details>
 

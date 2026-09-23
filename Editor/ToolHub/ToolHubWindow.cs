@@ -105,6 +105,7 @@ namespace TelleR
             const string ui = "2D & UI";
             const string comp = "Scene Components";
             const string project = "Project & Workflow";
+            const string analysis = "Performance & Analysis";
             const string xr = "XR (Meta Quest)";
 
             var list = new List<ToolEntry>
@@ -116,6 +117,14 @@ namespace TelleR
                 WindowEntry(mesh, "Skinned Mesh Collider",
                     "SkinnedMeshRenderer의 현재 포즈로 MeshCollider를 만들고 폴리곤을 간소화합니다.",
                     "Tools/TelleR/Skinned Mesh Collider"),
+                WindowEntry(mesh, "Grass Blade Mesh Generator",
+                    "로우폴리 풀잎 메쉬(Triangle/Quad/QuadCross/TriCross)를 크기·끝 폭·기울기를 정해 .asset으로 저장합니다.",
+                    "Tools/TelleR/Grass Blade Mesh Generator",
+                    "같은 이름으로 덮어쓸 때 GUID는 유지됩니다."),
+                WindowEntry(mesh, "Mesh Fragmenter",
+                    "선택한 메쉬를 보로노이 셀로 잘라, 단면이 막힌 물리 조각(볼록 MeshCollider + Rigidbody)을 원본 옆에 만듭니다.",
+                    "Tools/TelleR/Mesh Fragmenter",
+                    "씬 변경은 Ctrl+Z 한 번으로 되돌릴 수 있습니다(저장한 메쉬 .asset 파일은 남습니다)."),
                 ContextEntry(mesh, "Mesh Pivot Tool",
                     "메쉬 피벗 위치·회전을 수정합니다 (프리셋, 버텍스 스냅, Undo 지원).",
                     "여는 법: MeshFilter 또는 SkinnedMeshRenderer 우클릭 → Edit Mesh Pivot"),
@@ -147,6 +156,11 @@ namespace TelleR
                 WindowEntry(project, "UPM Package Creator",
                     "내 코드를 UPM 패키지로 만들어 git URL로 배포합니다 (asmdef·meta 자동 생성).",
                     "Tools/TelleR/UPM Package Creator"),
+
+                WindowEntry(analysis, "Tris Profiler",
+                    "카메라에 보이는 메시의 삼각형·정점 수를 합산하고, 가장 무거운 오브젝트를 순서대로 보여 줍니다.",
+                    "Tools/TelleR/Tris Profiler",
+                    "가림 컬링은 반영하지 않습니다. Terrain·파티클·UI는 세지 않습니다."),
 
                 ComponentEntry(xr, "Device Manager", typeof(DeviceManager),
                     "Quest 기종을 감지해 URP MSAA 프로필을 자동 적용합니다.",

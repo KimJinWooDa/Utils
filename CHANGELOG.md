@@ -2,6 +2,32 @@
 
 TelleR Utilities의 주요 변경 사항을 기록합니다. 형식은 [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/)를 따릅니다.
 
+## [1.3.0] - 2026-09-23
+
+EMBER 프로젝트 포크에서 쓰던 도구 3개를 가져와 이 패키지 기준(Unity 2021.3 ~ 6000.6 컴파일, Undo, 한국어 안내, Light/Dark 공용 스타일)에 맞춰 보강했습니다. 스크립트 GUID는 포크와 같게 유지해 기존 에셋 참조가 끊기지 않습니다.
+
+### Added
+- **Grass Blade Mesh Generator** (신규, `Tools → TelleR → Grass Blade Mesh Generator`) — 로우폴리 풀잎 메쉬(Triangle / Quad / QuadCross / TriCross)를 Width·Height·Tip Taper·Curve로 정해 `.asset`으로 저장. 피벗은 풀잎 뿌리, +Y가 위쪽이며 양면(Cull Off) 셰이더용
+  - 풀잎 1개당 정점·삼각형 수 표시, 저장 위치 미리보기와 잘못된 경로 경고, 기본 폴더 `Assets/TelleR/Generated/GrassBlades`
+  - 같은 이름이 있으면 덮어쓰기(GUID 유지, Ctrl+Z 가능) / 취소 / 새 이름으로 저장 선택
+  - 스크립트용 API `GrassBladeMeshGenerator.Generate` / `GenerateAndSave` / `DefaultAssetPath` / `ValidateAssetPath`, 생성 후 콜백을 받고 닫히는 `GrassBladeMeshGeneratorWindow.Open(Action<Mesh>)`
+- **Mesh Fragmenter** (신규, `Tools → TelleR → Mesh Fragmenter`) — 선택한 메쉬를 보로노이 셀로 잘라, 단면이 막힌 물리 조각(볼록 MeshCollider + Rigidbody)을 원본 옆 `{이름}_Fragments` 루트로 생성
+  - 대상 목록 배지(Ready / Open Mesh / No Mesh / Prefab Asset), 조각 수 4 / 8 / 16 / 32, Seed, Interior Material, Rigidbody 옵션, 원본 처리(Keep / Hide Renderer / Deactivate), 조각 메쉬 .asset 저장(기본 `Assets/TelleR/Fragments`)
+  - 다중 선택 일괄 처리와 진행 막대 취소, 씬 변경은 Undo 한 그룹, 프리팹 편집 모드 지원, 설정은 EditorPrefs에 저장
+  - 스크립트용 API `MeshFragmentEditor.Fragment(IList<GameObject>, MeshFragmenterOptions)`
+- **Tris Profiler** (신규, `Tools → TelleR → Tris Profiler`) — 카메라 절두체 안 MeshRenderer·SkinnedMeshRenderer의 삼각형·정점 합계와 무거운 순 표(상위 5~50행, 비율·LOD 단계·거리)
+  - Group by Mesh, 행 클릭·Ctrl(⌘)+클릭 선택, Select Top, 기준 카메라(MainCamera / 직접 지정 / Scene View)
+  - 머티리얼 슬롯·LODGroup 활성 단계·cullingMask 반영, Auto 갱신 간격 0.5~5초 자동 조정
+- **Tool Hub** — 새 도구 3개와 `Performance & Analysis` 카테고리 추가 (16개 도구)
+- `package.json` keywords에 grass, fragment, profiler 추가
+
+### Fixed
+EMBER 포크 버전과 비교한 수정입니다.
+- **Grass Blade Mesh Generator** — Reset이 Shape를 기본값(TriCross)으로 되돌리지 않던 문제
+- **Mesh Fragmenter** — 창을 다시 열거나 도메인 리로드·Play Mode 종료 뒤 Interior Material이 다른 머티리얼로 바뀔 수 있던 문제(FBX 내장·서브 에셋·Default-Material 같은 내장 머티리얼도 정확히 기억). 저장해 둔 머티리얼이 삭제·이동됐으면 칸을 비우고 경고 로그를 남김. 이전 빌드가 저장한 값(GUID만)은 해당 파일의 메인 머티리얼로 계속 불러옴
+- **Mesh Fragmenter** — `...` 버튼으로 `AssetsBackup`처럼 Assets 옆 폴더를 고를 수 있던 문제(`저장 폴더 오류` 대화상자 표시, 경로 저장 안 함). 창 안내에 Ctrl+Z는 씬 변경만 되돌리고 저장한 메쉬 .asset 파일은 남는다는 설명 추가
+- **Tris Profiler** — 다른 탭 뒤에 가려진 창이 스크립트 리컴파일·에디터 재시작 뒤 씬을 훑던 문제(탭이 실제로 보일 때만 셈), Auto가 꺼져 있으면 Refresh 전까지 비어 있던 문제(열리거나 보일 때 한 번 셈), 첫 열기·리로드 직후 "기준 카메라가 없습니다" 안내가 잠깐 뜨던 문제
+
 ## [1.2.0] - 2026-09-23
 
 ### Added
